@@ -261,8 +261,10 @@ swdcap/
     Uart.scala               P5   0x0500, RX is a pop port
   hw/test/                        SpinalSim: decoder, ID window, pop ports, error paths
   sim/                            P1a lane: Verilator + LiteX swdremote + OpenOCD (remote_bitbang)
-  gen/SwdcapTop.v                 generated; what non-Spinal users instantiate. Header records
-                                  the SpinalHDL commit and the generator options
+  gen/SwdcapTop.v                 generated; what non-Spinal users instantiate. Ports: clk, reset,
+                                  swclk, swdio_i / swdio_o / swdio_oe (pad is the design's), plus
+                                  instrument ports. Header records the SpinalHDL commit and the
+                                  generator options
   litex/swdcap_arty.py            stock LiteX-Boards digilent_arty target + two SWD pads on JB
   constr/arty_jb.xdc              SWCLK = JB3 (D15, clock-capable), SWDIO = JB7 (J17) with
                                   PULLUP; create_clock on SWCLK, async to sys_clk
@@ -274,6 +276,7 @@ swdcap/
     swdcap/openocd.py             Tcl RPC client (port 6666)
     swdcap/vcd.py                 ELA samples -> VCD
   docs/regmap.md                  ID window + DMI map, frozen in P0
+  docs/integration.md             how a design instantiates, pads, constrains and clocks SwdcapTop
 ```
 
 Ground and VTREF are wiring, not constraints: GND on JB11, a second GND from the breakout to JB5,
