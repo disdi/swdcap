@@ -32,23 +32,25 @@ DebugBus(addressWidth = 16) ── DMI decoder                                [d
 - MEM-AP, ROM table, ADIv6. The gateway is a designer-AP, so stock `mdw` and `dap info` do not apply.
 - Any change to the gateway RTL or its AP register map
 - Secure debug / authentication
-- Black Magic Probe as an instrument host. The BMP patch matches the gateway AP_IDR but expects a DM.
+- Black Magic Probe as an instrument host. Its gateway support ([blackmagic#2322](https://codeberg.org/blackmagic-debug/blackmagic/pulls/2322)) matches the AP_IDR but
+  expects a DM.
 
 ## Reuse, not rewrite
 
 Everything from the pins to the DMI bus already exists. It is merged upstream and
-hardware-verified on the Arty (Pi Debug Probe, MCU-Link, BMP) and the Kopflos:
+hardware-verified on a Digilent Arty A7 (Pi Debug Probe, MCU-Link, Black Magic Probe) and a
+Machdyne Kopflos (ECP5):
 
 | Piece | Source | What it already gives swdcap |
 |---|---|---|
-| `SwdPhy`, `SwdDp` | `spinal.lib.com.swd` (SpinalHDL#1966) | Line reset, turnaround, parity, ACK; DPIDR, CTRL/STAT, SELECT, RDBUFF/RESEND, ABORT, sticky errors, WAIT gating, posted reads |
+| `SwdPhy`, `SwdDp` | `spinal.lib.com.swd` ([SpinalHDL#1966](https://github.com/SpinalHDL/SpinalHDL/pull/1966)) | Line reset, turnaround, parity, ACK; DPIDR, CTRL/STAT, SELECT, RDBUFF/RESEND, ABORT, sticky errors, WAIT gating, posted reads |
 | `SwdDmiGateway` | `spinal.lib.cpu.riscv.debug.DebugTransportModuleSwd` | Designer-AP, the CDC (`ccToggle`, BOOT-reset SWCLK domain), one outstanding DMI access, `DebugRsp.error` → STICKYERR |
 | `DebugBus`, `DebugBusSlaveFactory` | `spinal.lib.cpu.riscv.debug.DebugInterfaces` | 32-bit word-addressed bus plus a register-file factory for the instruments |
-| Raw-AP host procs | `litex/litex/tools/debug/vexriscv_swd.cfg` | `dmi_read` / `dmi_write` over `dap apreg`, already proven on stock OpenOCD master |
+| Raw-AP host procs | [`vexriscv_swd.cfg`](https://github.com/disdi/litex/tree/swd/litex/tools/debug/vexriscv_swd.cfg) (disdi/litex `swd`) | `dmi_read` / `dmi_write` over `dap apreg`, already proven on stock OpenOCD master |
 
 **New work is only below `DebugBus`:** the decoder and the instruments. The deliverable is
 generated Verilog (`SwdcapTop`), so users do not need SpinalHDL, plus a LiteX wrapper for Arty
-bring-up, modelled on `arty_vexii_swd.py`.
+bring-up: LiteX-Boards' stock `digilent_arty` target with two added SWD pads.
 
 `SwdcapTop` = `DebugTransportModuleSwd(p.addressWidth = 16)` + decoder + instruments.
 `addressWidth` is an existing parameter, not an RTL change. The 16-bit DMI word address gives a
@@ -79,7 +81,8 @@ Properties swdcap inherits and must design around:
   Only instruments that sample on another clock (the ELA) need their own internal crossing.
 - **Errors.** A `DebugRsp.error` from the decoder → STICKYERR, which OpenOCD clears via ABORT.
   An unmapped address returns an error, except the reserved DM range (below).
-- **Tool identification.** OpenOCD's `vexriscv-gateway` backend and the BMP patch recognise
+- **Tool identification.** The OpenOCD gateway backend ([disdi/openocd `vexriscv-gateway`](https://github.com/disdi/openocd/tree/vexriscv-gateway)) and the BMP support
+  ([blackmagic#2322](https://codeberg.org/blackmagic-debug/blackmagic/pulls/2322)) recognise
   `0x74726976` and look for a DM at DMI `0x00–0x7F`; the backend fixes `abits` at 7. With no DM,
   that range reads 0, and `dmstatus.version = 0` means "no Debug Module present" (Debug Spec
   §3.1.14.1), so those tools stop cleanly instead of misreading instruments.
@@ -114,8 +117,8 @@ DMI_ADDR width by writing `0xFFFFFFFF` to AP `0x04` and reading it back.
 
 ## Pinout
 
-The Arty bring-up reuses the existing **JB SWD harness**, so `swd_rawbits.sh` and the golden
-gate apply unchanged:
+The Arty bring-up reuses the existing **JB SWD harness**, so a known-good reference bitstream for
+that harness can check the rig before every bring-up:
 
 | Signal | Arty | Notes |
 |---|---|---|
@@ -128,8 +131,8 @@ gate apply unchanged:
 
 Direct wires only; a PmodTPH2 pass-through kills the link.
 
-**Kopflos port (after v0.1):** ElemRV harness on PMOD1 (SWCLK J3, SWDIO K2). PMOD2 M5/T4 is the
-Steg console.
+**Machdyne Kopflos port (after v0.1):** reuse the harness already verified there with ElemRV, on
+PMOD1 (SWCLK J3, SWDIO K2). PMOD2 M5/T4 is taken by the UART console (Machdyne Steg).
 
 ## Phases
 
@@ -143,11 +146,13 @@ Steg console.
 
 ### P1 — gateway + ID window
 
-**P1a sim.** `SwdcapTop` with the ID window only, under Verilator. LiteX `swdremote` + stock
-OpenOCD master (`~/openocd-master` or a `master` worktree) — the existing raw-AP smoke lane,
+**P1a sim.** `SwdcapTop` with the ID window only, under Verilator. The LiteX `swdremote` sim module
+([disdi/litex `swd`](https://github.com/disdi/litex/tree/swd/litex/build/sim/core/modules/swdremote)) + stock OpenOCD master over
+`remote_bitbang`. This is the raw-AP lane already used for the RISC-V gateway,
 pointed at the ID window instead of `dmstatus`.
 
-**P1b Arty.** Before loading the new image, run `./golden/verify.sh` to prove the rig. Then, with
+**P1b Arty.** Before loading the new image, load a known-good reference bitstream for the same harness and
+confirm it passes, to prove the rig. Then, with
 the Pi Debug Probe:
 
 ```
@@ -220,7 +225,7 @@ Same job as fcapz `eio-read` / `eio-write`. Wire LEDs and buttons. The host is s
 
 - Put a VexRiscv/VexiiRiscv `DebugModule` at DMI `0x00–0x7F` behind the same decoder; set
   FEATURES bit 5.
-- The existing `vexriscv-gateway` OpenOCD `riscv` target (abits 7) and the BMP patch then debug
+- The `vexriscv-gateway` OpenOCD `riscv` target (abits 7) and the BMP support then debug
   the CPU **unchanged**, while the instruments stay reachable through `dap apreg` above `0x7F`.
 - Check how OpenOCD's DM scan (`nextdm`) and BMP behave with a DMI_ADDR wider than 7 bits before
   claiming this.
@@ -241,14 +246,14 @@ source [find target/swdcap.cfg]      ;# swd newdap / dap create / swdcap_rd / sw
 
 | Risk | Mitigation |
 |---|---|
-| Rig faults masquerading as RTL bugs (VTREF / SWCLK / SWDIO leads) | `./golden/verify.sh` before every bring-up; `swd_rawbits.sh` on a red result; reproduce any failure on an independent rebuild |
+| Rig faults masquerading as RTL bugs (VTREF / SWCLK / SWDIO leads) | known-good reference bitstream before every bring-up; a raw SWCLK/SWDIO line check when it fails; reproduce any failure on an independent rebuild |
 | SWDIO→SWCLK crosstalk | Second ground JP2.3→JB5; separated leads; JB3/JB7, never adjacent pins |
 | Gateway CDC at untested clock ratios | P1 exit runs debug clock both below and above SWCLK |
 | Readout throughput (no autoincrement) | Pop ports; batched Tcl procs; measured in P3 |
 | Tools mistake the gateway for a CPU | DM range reads 0 → `dmstatus.version = 0`; documented in the README |
 | `dap info` output misleads users | Documented; `swdcap probe` is the supported identification path |
 | Bus bridge error wedges the DAP | Wishbone ERR reported in STAT, not as STICKYERR |
-| DPIDR designer code is a squat (Facebook Inc) | Documented upstream and accepted in blackmagic#2322; identity is DPIDR + AP_IDR together; any change goes upstream in lockstep |
+| DPIDR designer code is a squat (Facebook Inc) | Documented upstream and accepted in [blackmagic#2322](https://codeberg.org/blackmagic-debug/blackmagic/pulls/2322); identity is DPIDR + AP_IDR together; any change goes upstream in lockstep |
 
 ## Exit for a public v0.1
 
