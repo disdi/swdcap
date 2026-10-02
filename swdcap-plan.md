@@ -139,8 +139,11 @@ PMOD1 (SWCLK J3, SWDIO K2). PMOD2 M5/T4 is taken by the UART console (Machdyne S
 ### P0 — contract
 
 - Freeze the ID window, FEATURES and the DMI map above.
-- **DPIDR / AP_IDR:** inherited unchanged from the gateway, `0x0BA11AAB` / `0x74726976`. Decided;
-  see **Decided** below.
+- **DPIDR / AP_IDR:** inherited unchanged from the gateway, `0x0BA11AAB` / `0x74726976`, so the
+  OpenOCD gateway backend and the Black Magic Probe keep identifying the transport. The designer
+  code is a documented squat (JEP106 continuation 10, identity `0x55`, Facebook Inc), accepted in
+  [blackmagic#2322](https://codeberg.org/blackmagic-debug/blackmagic/pulls/2322). Any change
+  belongs upstream in SpinalHDL.
 - Bus bridge target: **Wishbone** (decided).
 - Pick the nRESET pin.
 
@@ -209,13 +212,13 @@ Same job as fcapz `eio-read` / `eio-write`. Wire LEDs and buttons. The host is s
 
 ### P6 — host
 
-- **P6a**: `tcl/target/swdcap.cfg` in tree: the P1b DAP setup plus `swdcap_rd` / `swdcap_wr` /
+- **P6a**: `openocd/swdcap.cfg` in tree: the P1b DAP setup plus `swdcap_rd` / `swdcap_wr` /
   `swdcap_pop <addr> <n>` procs. Stock OpenOCD master; no `riscv` or `mem_ap` target.
 - **P6b**: `swdcap` Python CLI over the OpenOCD Tcl RPC port (6666), so it works with any adapter
   OpenOCD supports. Verbs follow fcapz names where they exist:
   - `probe` (AP_IDR / magic / version / features / widths / DMI_ADDR width)
   - `eio-read` / `eio-write`
-  - `ela-arm` / `ela-status` / `ela-dump --vcd`
+  - `ela-arm` / `ela-status` / `ela-dump --vcd` (`capture` = arm + wait + dump)
   - `bus-read` / `bus-write`
   - `uart` (console)
 - Throughput: each Tcl `apreg` is one USB round trip. If `ela-dump` of 1024 samples is too slow,
@@ -239,8 +242,43 @@ Any CMSIS-DAP probe is the SWD master. OpenOCD is stock master, using raw AP acc
 source [find interface/cmsis-dap.cfg]
 transport select swd
 adapter speed 2000
-source [find target/swdcap.cfg]      ;# swd newdap / dap create / swdcap_rd / swdcap_wr / swdcap_pop
+source openocd/swdcap.cfg            ;# swd newdap / dap create / swdcap_rd / swdcap_wr / swdcap_pop
 ```
+## Folder structure
+
+```
+swdcap/
+  README.md                       pitch, scope, Arty wiring table (incl. JB5 second GND, VTREF)
+  LICENSE                         MIT
+  build.sbt                       pins SpinalHDL >= 90b7d8eee (#1966, spinal.lib.com.swd)
+  hw/spinal/swdcap/
+    SwdcapTop.scala          P1   DebugTransportModuleSwd(addressWidth = 16) + DMI decoder;
+                                  decoder also answers the DM-reserved 0x0000-0x007F with 0
+    IdWindow.scala           P1   0x0100: magic, version, features, widths; scratch at 0x0107
+    Eio.scala                P2   0x0200
+    Ela.scala                P3   ctrl 0x0300 (RD_PTR / RD_POP), sample RAM 0x8000
+    WbBridge.scala           P4   0x0400, Wishbone ERR in STAT, not STICKYERR
+    Uart.scala               P5   0x0500, RX is a pop port
+  hw/test/                        SpinalSim: decoder, ID window, pop ports, error paths
+  sim/                            P1a lane: Verilator + LiteX swdremote + OpenOCD (remote_bitbang)
+  gen/SwdcapTop.v                 generated; what non-Spinal users instantiate. Header records
+                                  the SpinalHDL commit and the generator options
+  litex/swdcap_arty.py            stock LiteX-Boards digilent_arty target + two SWD pads on JB
+  constr/arty_jb.xdc              SWCLK = JB3 (D15, clock-capable), SWDIO = JB7 (J17) with
+                                  PULLUP; create_clock on SWCLK, async to sys_clk
+  openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr / swdcap_pop
+  py/
+    pyproject.toml                package "swdcap", console entry point `swdcap`
+    swdcap/cli.py                 probe, eio-read/-write, ela-arm/-status/-dump, capture,
+                                  bus-read/-write, uart
+    swdcap/openocd.py             Tcl RPC client (port 6666)
+    swdcap/vcd.py                 ELA samples -> VCD
+  docs/regmap.md                  ID window + DMI map, frozen in P0
+```
+
+Ground and VTREF are wiring, not constraints: GND on JB11, a second GND from the breakout to JB5,
+and VTREF on JB12 (MCU-Link only; leave it open on the Pi Debug Probe). Never put SWCLK and SWDIO
+on adjacent pins.
 
 ## Risks
 
@@ -257,7 +295,7 @@ source [find target/swdcap.cfg]      ;# swd newdap / dap create / swdcap_rd / sw
 
 ## Exit for a public v0.1
 
-- Arty bitstream, JB harness documented, `swdcap.cfg` in tree, generated `SwdcapTop.v` + LiteX
+- Arty bitstream, JB harness documented, `openocd/swdcap.cfg` in tree, generated `SwdcapTop.v` + LiteX
   wrapper.
 - `swdcap probe` prints AP_IDR, magic, version, features.
 - EIO toggles an LED.
