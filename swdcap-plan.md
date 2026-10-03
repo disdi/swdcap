@@ -75,7 +75,11 @@ case class SwdcapConfig(
   withEio:  Boolean = true,
   withEla:  Boolean = false,
   withWb:   Boolean = false,
-  withUart: Boolean = false
+  withUart: Boolean = false,
+  eioInWidth:   Int  = 8,
+  eioOutWidth:  Int  = 8,
+  scratchWidth: Int  = 32,
+  debugClkHz:   Long = 0         // reported in DEBUG_CLK_HZ; 0 = unknown
 )
 ```
 
@@ -137,13 +141,13 @@ Properties swdcap inherits and must design around:
 |---|---|---|---|
 | `0x0000–0x007F` | `0x0_0000` | DM reserved | Reads 0, writes ignored, no error. A DM goes here in P7 |
 | `0x0100` | `0x0_0400` | ID | Magic, version, features, clock, widths, scratch |
-| `0x0200` | `0x0_0800` | EIO | IN, OUT, OE, WIDTH |
+| `0x0200` | `0x0_0800` | EIO | IN (`0x0200`), OUT (`0x0201`). `0x0202` is held for a later output-enable register; the widths are in the ID window |
 | `0x0300` | `0x0_0C00` | ELA ctrl | Reserved. STICKYERR until generated (after v0.1) |
 | `0x0400` | `0x0_1000` | Bus bridge | Reserved. STICKYERR until generated (after v0.1) |
 | `0x0500` | `0x0_1400` | UART | Reserved. STICKYERR until generated (after v0.1) |
 | `0x8000–0xFFFF` | `0x2_0000` | ELA sample RAM | Reserved. Does not fit a TT tile; FPGA-only later |
 
-### ID window (draft, frozen at end of P0)
+### ID window (frozen in P0; full contract in [docs/regmap.md](docs/regmap.md))
 
 | Word | Register | Value |
 |---|---|---|
@@ -246,6 +250,20 @@ PMOD1 (SWCLK J3, SWDIO K2). PMOD2 M5/T4 is taken by the UART console (Machdyne S
 
 ### P0 — contract
 
+**Done 2026-10-03.** The contract is frozen in [docs/regmap.md](docs/regmap.md) and
+`hw/spinal/swdcap/SwdcapRegs.scala`; the generator options are in `SwdcapConfig.scala`, with unit
+tests in `hw/test/`. `sbt test` builds against the pinned SpinalHDL submodule.
+
+Decisions taken while freezing:
+
+- EIO has two registers, IN and OUT. There is no output-enable register in v0.1, because
+  `eio_out` is a plain output port; `0x0202` is held for one.
+- Unmapped words inside a mapped window return an error, like the reserved windows. A write to a
+  read-only register is ignored without an error.
+- `0x0080–0x00FF` is unmapped (error). Only `0x0000–0x007F` is the read-zero DM range.
+- `DEBUG_CLK_HZ` is a generation-time constant, and `0` means unknown.
+- `eioInWidth`, `eioOutWidth`, `scratchWidth` and `debugClkHz` are generator options.
+
 - Freeze the ID window, FEATURES and the DMI map above. `0x0300`, `0x0400`, `0x0500` and
   `0x8000` stay reserved and return STICKYERR.
 - **DPIDR / AP_IDR:** inherited unchanged from the gateway, `0x0BA11AAB` / `0x74726976`, so the
@@ -308,8 +326,9 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
   wrapper work. Starting point: the gateway alone is about 447 flops in an existing
   `addressWidth = 7` netlist (PHY 131, DP 78, gateway 115, CDC about 120). The v0.1 FPGA config
   is roughly 550. One tile is not expected to fit; 1x2 is the target and is not yet confirmed.
-- **Trims if 1x2 does not hold**, in this order: `addressWidth = 10`, a narrower SCRATCH, no EIO
-  output-enable register.
+- **Trims if 1x2 does not hold.** `addressWidth = 10` is already the wrapper default and there is
+  no EIO output-enable register. Next, in this order: a narrower `scratchWidth`, then narrower
+  EIO widths.
 - **Wrapper.** `tt_um_*` top with the pin map above, `info.yaml`, unused `uio` tied off.
 - **Pull-up rehearsal.** On the Arty, turn off the internal SWDIO pull-up in the XDC and fit the
   same 10 kΩ–100 kΩ resistor on the TPH2's SWDIO test point. That is the electrical setup the
@@ -383,20 +402,23 @@ source openocd/swdcap.cfg            ;# swd newdap / dap create / swdcap_rd / sw
 swdcap/
   README.md                       pitch, scope, Arty wiring table (incl. JB5 second GND, VTREF)
   LICENSE                         MIT
-  build.sbt                       pins SpinalHDL >= 90b7d8eee (#1966, spinal.lib.com.swd)
+  build.sbt, project/             sbt build against SpinalHDL from source (SPINALHDL_PATH overrides)
+  ext/SpinalHDL                   submodule pinned to 90b7d8eee (#1966, spinal.lib.com.swd)
   hw/spinal/swdcap/
     SwdcapTop.scala          P1   SwdPhyDp + SwdDmiGateway (selectable SWCLK reset) + DMI
                                   decoder; decoder also answers the DM-reserved 0x0000-0x007F
                                   with 0
     IdWindow.scala           P1   0x0100: magic, version, features, widths; scratch at 0x0107
     Eio.scala                P2   0x0200
+    SwdcapRegs.scala         P0   frozen addresses and constants (mirror of docs/regmap.md)
     SwdcapConfig.scala       P0   addressWidth 16, swdAsyncReset false, withEio true;
                                   withEla / withWb / withUart default false
     # after v0.1, not in the v0.1 tree:
     # Ela.scala              P3   ctrl 0x0300, sample RAM 0x8000
     # WbBridge.scala         P4   0x0400, Wishbone ERR in STAT, not STICKYERR
     # Uart.scala             P5   0x0500, RX is a pop port
-  hw/test/                        SpinalSim: decoder, ID window, EIO, reserved-window STICKYERR
+  hw/test/swdcap/                 scalatest: config and register contract (P0); SpinalSim: decoder,
+                                  ID window, EIO, reserved-window STICKYERR (P1, P2)
   sim/                            P1a lane: Verilator + LiteX swdremote + OpenOCD (remote_bitbang)
   gen/SwdcapTop.v                 generated; what non-Spinal users instantiate. Ports: clk, reset,
                                   swclk, swdio_i / swdio_o / swdio_oe (pad is the design's), plus
@@ -413,7 +435,7 @@ swdcap/
     pyproject.toml                package "swdcap", console entry point `swdcap`
     swdcap/cli.py                 probe, eio-read / eio-write
     swdcap/openocd.py             Tcl RPC client (port 6666)
-  docs/regmap.md                  ID window + DMI map, frozen in P0; later windows reserved
+  docs/regmap.md                  the frozen v0.1 contract: AP registers, DMI map, ID and EIO windows
   docs/integration.md             how a design instantiates, pads, constrains and clocks SwdcapTop
 ```
 
@@ -429,7 +451,7 @@ on adjacent pins.
 | SWDIO→SWCLK crosstalk | Second ground JP2.3→JB5; separated leads; JB3/JB7, never adjacent pins |
 | Gateway CDC at untested clock ratios | P1 exit runs debug clock both below and above SWCLK |
 | TT mux delay (~20 ns round trip) limits SWCLK | Start at 1 MHz on silicon; 20 ns is small against 125 ns at 4 MHz, so measure the ceiling |
-| P1 core does not fit 1x2 SKY tiles | ELA / WB / UART generated out; area check first in PT (about 550 flops estimated); trims: `addressWidth = 10`, narrower SCRATCH, no EIO OE |
+| P1 core does not fit 1x2 SKY tiles | ELA / WB / UART generated out; area check first in PT (about 550 flops estimated); trims: narrower `scratchWidth`, then narrower EIO widths |
 | Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`; gate-level sim with X-initialised flops |
 | SWCLK on a data pin has no clock constraints or tree | Two-clock SDC in PT; confirm TT flow support before the shuttle deadline |
 | SWDIO floats on TT (no internal pull-up) | 10 kΩ–100 kΩ from `uio[4]` to 3.3 V, on a TPH2 test point, not in series; rehearsed on the Arty in PT |

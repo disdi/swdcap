@@ -74,7 +74,7 @@ The address map lives inside `SwdcapTop`. The design does not assign DMI address
 | Wishbone bridge | later | `0x0400`: ADDR, WDATA, RDATA, CMD, STAT | Read or write one fabric-bus word |
 | UART | later | `0x0500`, RX pops on read | Byte stream over the same two wires |
 
-Register offsets inside each window are in `docs/regmap.md` (frozen in P0).
+Register offsets inside each window are in [regmap.md](regmap.md), frozen for v0.1.
 
 ### Constraints
 

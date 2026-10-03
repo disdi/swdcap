@@ -18,13 +18,16 @@ OpenOCD (dap apreg) + swdcap CLI
 
 ## Status
 
-Planning. No RTL or host code yet.
+P0 (the register contract) is done. No RTL or host code yet.
+
+Build check: `git submodule update --init` then `sbt test` (needs a JDK and sbt).
 
 Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then a Tiny Tapeout
 (SKY130) wrapper once EIO works on both.
 
 - [Plan](swdcap-plan.md)
 - [Integration guide](docs/integration.md)
+- [Register map](docs/regmap.md) (frozen for v0.1)
 
 ## Scope
 
