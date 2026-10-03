@@ -277,10 +277,21 @@ Decisions taken while freezing:
 
 ### P1 — gateway + ID window
 
-**P1a sim.** `SwdcapTop` with the ID window only, under Verilator. The LiteX `swdremote` sim module
-([disdi/litex `swd`](https://github.com/disdi/litex/tree/swd/litex/build/sim/core/modules/swdremote)) + stock OpenOCD master over
-`remote_bitbang`. This is the raw-AP lane already used for the RISC-V gateway,
-pointed at the ID window instead of `dmstatus`.
+**P1a sim. Done 2026-10-03.** `SwdcapTop` with the ID window only (`withEio = false` until P2),
+under Verilator, in two shapes: `fpga` (16-bit DMI address, BOOT-reset SWCLK domain) and `silicon`
+(10-bit, SWCLK domain reset from the debug reset).
+
+- **SpinalSim, `sbt test`:** the upstream SWD host model drives the real wire protocol. Per shape:
+  identify + ID window + SCRATCH with the debug clock slower than, faster than and much slower
+  than SWCLK; DMI_ADDR width; the DM range; read-only registers; unmapped and not-generated
+  windows returning an error with ABORT recovery (including `0x0300` at 10 bits); FAULT while
+  sticky; line reset mid-session. `silicon` also checks that the debug reset clears the SWD side
+  and that addresses beyond 10 bits alias.
+- **Real OpenOCD, `sim/run_openocd.sh [fpga|silicon]`:** stock OpenOCD over `remote_bitbang`
+  against the same simulation, running `openocd/swdcap.cfg` and `sim/p1_check.tcl`. The server is
+  `SwdRemoteBitbang` in this repo; it speaks the same protocol as the LiteX `swdremote` module
+  used for the RISC-V gateway, so the repo needs no LiteX.
+- `gen/SwdcapTop.v` is the `fpga` shape: about 530 flops without EIO.
 
 **P1b Arty.** Before loading the new image, load a known-good reference bitstream for the same harness and
 confirm it passes, to prove the rig. Then, with
@@ -413,6 +424,7 @@ swdcap/
     SwdcapTop.scala          P1   SwdPhyDp + SwdDmiGateway (selectable SWCLK reset) + DMI
                                   decoder; decoder also answers the DM-reserved 0x0000-0x007F
                                   with 0
+    RegWindow.scala          P1   register port between the decoder and one 256-word window
     IdWindow.scala           P1   0x0100: magic, version, features, widths; scratch at 0x0107
     Eio.scala                P2   0x0200
     SwdcapRegs.scala         P0   frozen addresses and constants (mirror of docs/regmap.md)
@@ -422,9 +434,11 @@ swdcap/
     # Ela.scala              P3   ctrl 0x0300, sample RAM 0x8000
     # WbBridge.scala         P4   0x0400, Wishbone ERR in STAT, not STICKYERR
     # Uart.scala             P5   0x0500, RX is a pop port
-  hw/test/swdcap/                 scalatest: config and register contract (P0); SpinalSim: decoder,
+  hw/test/swdcap/                 scalatest: config and register contract (P0); SwdRemoteBitbang
+                                  (remote_bitbang server for OpenOCD); SpinalSim: decoder,
                                   ID window, EIO, reserved-window STICKYERR (P1, P2)
-  sim/                            P1a lane: Verilator + LiteX swdremote + OpenOCD (remote_bitbang)
+  sim/                            P1a lane with a real OpenOCD: run_openocd.sh, openocd_sim.cfg
+                                  (remote_bitbang), p1_check.tcl
   gen/SwdcapTop.v                 generated; what non-Spinal users instantiate. Ports: clk, reset,
                                   swclk, swdio_i / swdio_o / swdio_oe (pad is the design's), plus
                                   instrument ports. Header records the SpinalHDL commit and the
@@ -435,7 +449,8 @@ swdcap/
                                   the TT template; decided in PT)
   constr/arty_jb.xdc              SWCLK = JB3 (D15, clock-capable), SWDIO = JB7 (J17) with
                                   PULLUP; create_clock on SWCLK, async to sys_clk
-  openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr
+  openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr / swdcap_probe /
+                                  swdcap_addr_width
   py/
     pyproject.toml                package "swdcap", console entry point `swdcap`
     swdcap/cli.py                 probe, eio-read / eio-write

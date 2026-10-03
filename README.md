@@ -18,9 +18,11 @@ OpenOCD (dap apreg) + swdcap CLI
 
 ## Status
 
-P0 (the register contract) is done. No RTL or host code yet.
+P0 (the register contract) and P1a (gateway + ID window, in simulation) are done. Not yet run on
+hardware. EIO is next (P2).
 
-Build check: `git submodule update --init` then `sbt test` (needs a JDK and sbt).
+Build and test: `git submodule update --init`, then `sbt test` (needs a JDK, sbt and Verilator).
+`sim/run_openocd.sh` runs a real OpenOCD against the simulation; set `OPENOCD` to the binary.
 
 Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then a Tiny Tapeout
 (SKY130) wrapper once EIO works on both.
