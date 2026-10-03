@@ -308,7 +308,9 @@ swdcap_rd 0x4000                                             ;# unmapped: expect
 **Exit:**
 - DPIDR, AP_IDR and MAGIC stable.
 - Scratch read/write stable at 1 MHz. 4 MHz is an Arty-only stretch; Tiny Tapeout stays at 1 MHz.
-- An access to `0x0300` sets STICKYERR, and the next access after ABORT succeeds.
+- An access to `0x0300` sets STICKYERR, and the next access after ABORT succeeds. This must also
+  hold with `addressWidth = 10`, where `0x0300` is addressable: the decoder errors on a window
+  that is not generated, and the host trusts FEATURES, not the DMI_ADDR read-back.
 - Repeat with a debug clock below **and** above SWCLK. The gateway CDC is proven for the DM's
   clock ratios, not for arbitrary ones.
 
@@ -346,6 +348,9 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
 - **Shuttle.** Pick the shuttle and note its deadline here.
 
 ### P3 — ELA, small (after v0.1, generated out)
+
+First step: remove `withEla` from the v0.1 guard in `SwdcapConfig` (`require(!withEla && …)`).
+P4 and P5 do the same for `withWb` and `withUart`.
 
 - 32-bit probes, depth 256 or 1024. The sample clock may differ from the debug clock, so the
   crossing is internal to the ELA.

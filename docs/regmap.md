@@ -103,6 +103,11 @@ FEATURES bits:
 4. Read VERSION, FEATURES and the widths; never hard-code them.
 5. Read back the DMI_ADDR width and refuse addresses beyond it.
 
+**FEATURES decides whether an instrument exists, not the address width.** An address that
+DMI_ADDR stores and reads back is only addressable. For example, `0x0300` fits in the Tiny
+Tapeout build's 10 bits and still returns an error, because the ELA is not generated. The host
+must check the FEATURES bit before it uses a window.
+
 ## Generator options that change this map
 
 | Option | Default | Tiny Tapeout | Effect on the map |

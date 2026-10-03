@@ -29,11 +29,15 @@ class SwdcapConfigTest extends AnyFunSuite {
     assert(c.eioWidthReg == BigInt(0x0808))
   }
 
+  // reaches() is about address width only. ELA_BASE fits in 10 bits on the Tiny Tapeout build,
+  // yet the ELA is not generated (features bit 1 is clear) and the window must return an error.
+  // That error is checked on the RTL in P1; here only the width and FEATURES are checked.
   test("Tiny Tapeout config reaches ID and EIO but not the later windows") {
     val c = SwdcapConfig.tinyTapeout
     assert(c.addressWidth == 10 && c.swdAsyncReset)
     assert(c.features == BigInt(1))
     assert(c.reaches(ID_SCRATCH) && c.reaches(EIO_OUT) && c.reaches(ELA_BASE))
+    assert(!c.features.testBit(FEATURE_ELA), "ELA_BASE is addressable but the ELA does not exist")
     assert(!c.reaches(WB_BASE) && !c.reaches(UART_BASE) && !c.reaches(ELA_RAM_BASE))
   }
 

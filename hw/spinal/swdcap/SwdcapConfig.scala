@@ -32,6 +32,8 @@ case class SwdcapConfig(
   require(eioOutWidth >= 1 && eioOutWidth <= 32, s"eioOutWidth must be 1 to 32, got $eioOutWidth")
   require(scratchWidth >= 1 && scratchWidth <= 32, s"scratchWidth must be 1 to 32, got $scratchWidth")
   require(debugClkHz >= 0 && debugClkHz <= 0xFFFFFFFFL, s"debugClkHz must fit 32 bits, got $debugClkHz")
+  // v0.1 guard. Remove the matching term when that instrument is implemented (ELA: P3,
+  // Wishbone bridge: P4, UART: P5).
   require(!withEla && !withWb && !withUart, "ELA, the Wishbone bridge and UART are not implemented in v0.1")
 
   /** Value of the FEATURES register. */
@@ -46,7 +48,11 @@ case class SwdcapConfig(
   def eioWidthReg: BigInt =
     if (withEio) (BigInt(eioOutWidth) << 8) | eioInWidth else BigInt(0)
 
-  /** True when a DMI word address can be reached with this addressWidth. */
+  /**
+   * True when a DMI word address fits in addressWidth bits. This says nothing about whether a
+   * window exists there: on the Tiny Tapeout build 0x0300 fits in 10 bits and still returns an
+   * error. Whether an instrument exists is FEATURES, not this.
+   */
   def reaches(address: Int): Boolean = address >= 0 && BigInt(address) < (BigInt(1) << addressWidth)
 }
 
