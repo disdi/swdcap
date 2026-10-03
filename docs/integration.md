@@ -5,6 +5,11 @@ master. The Pmod carries SWCLK, SWDIO and ground, plus VTREF for probes that sen
 instantiates `SwdcapTop` and ties instrument ports to real signals. There is no probe firmware, no
 OpenOCD fork, and no change to the board's JTAG or SPI configuration path.
 
+**v0.1 scope:** the gateway, the ID window and EIO. The logic analyzer (ELA), Wishbone bridge
+and UART are planned for later releases; their windows are reserved and return an error
+(STICKYERR) until they are generated. Nothing is built yet; this guide describes the planned
+interface.
+
 ### What the design does
 
 1. Add `gen/SwdcapTop.v`. The rest of the project can stay Verilog, VHDL or LiteX; SpinalHDL is
@@ -12,8 +17,9 @@ OpenOCD fork, and no change to the board's JTAG or SPI configuration path.
 2. Instantiate it next to the logic to be observed. FPGA configuration is unchanged; SWD is a
    second port.
 3. Clock it. `clk` / `reset` is the debug clock that the instruments and the gateway's CDC run on,
-   usually `sys_clk`. SWCLK clocks only the SWD PHY and DP, and has no reset by design (line reset
-   is the protocol reset).
+   usually `sys_clk`. SWCLK clocks only the SWD PHY and DP. On FPGA that side has no reset input:
+   start values come from bitstream initialisation, and line reset is the protocol reset. The
+   silicon build (`swdAsyncReset = true`) also resets it from `reset`.
 4. Put the SWDIO pad in the design. `SwdcapTop` exposes SWDIO as three signals, `swdio_i`,
    `swdio_o` and `swdio_oe`, and the design adds the vendor tristate buffer (below).
 5. Tie every instrument input explicitly. Unconnected inputs are undriven: X in simulation and
@@ -36,10 +42,9 @@ SwdcapTop u_swdcap (
   .swdio_o    (swdio_o),          // to the pad
   .swdio_oe   (swdio_oe),         // 1 = target drives SWDIO
   .eio_in     (buttons),
-  .eio_out    (leds),
-  .ela_clk    (sample_clk),       // may differ from clk
-  .ela_probe  (probes),
-  // optional, only if generated:
+  .eio_out    (leds)
+  // after v0.1, only if generated:
+  // ELA: ela_clk (may differ from clk), ela_probe
   // Wishbone master: wb_cyc, wb_stb, wb_we, wb_adr, wb_dat_w, wb_dat_r, wb_ack, wb_err
   // UART byte streams to the design: uart_tx_*, uart_rx_*
 );
@@ -61,12 +66,13 @@ In LiteX, use a `TSTriple` on the platform pad and an `Instance("SwdcapTop", …
 The address map lives inside `SwdcapTop`. The design does not assign DMI addresses, and
 `0x0000–0x007F` is reserved for a later Debug Module.
 
-| Instrument (if generated) | DMI word | What a session can do |
-|---|---|---|
-| EIO | `0x0200` | Drive and sample pins |
-| ELA | ctrl `0x0300`, samples via `RD_POP` | Capture a window to a VCD |
-| Wishbone bridge | `0x0400`: ADDR, WDATA, RDATA, CMD, STAT | Read or write one fabric-bus word |
-| UART | `0x0500`, RX pops on read | Byte stream over the same two wires |
+| Instrument | Release | DMI word | What a session can do |
+|---|---|---|---|
+| ID window | v0.1 | `0x0100` | Read magic, version, features and widths |
+| EIO | v0.1 | `0x0200` | Drive and sample pins |
+| ELA | later | ctrl `0x0300`, samples via `RD_POP` | Capture a window to a VCD |
+| Wishbone bridge | later | `0x0400`: ADDR, WDATA, RDATA, CMD, STAT | Read or write one fabric-bus word |
+| UART | later | `0x0500`, RX pops on read | Byte stream over the same two wires |
 
 Register offsets inside each window are in `docs/regmap.md` (frozen in P0).
 
@@ -103,7 +109,7 @@ Any CMSIS-DAP probe uses the same config:
 ```tcl
 source [find interface/cmsis-dap.cfg]
 transport select swd
-adapter speed 2000
+adapter speed 1000
 source openocd/swdcap.cfg
 init
 ```
@@ -115,10 +121,10 @@ Then run the procs through `-c` on the command line, the telnet port (4444) or t
 swdcap_rd 0x0100    ;# magic 0x43445753: bitstream is up
 ```
 
-The `swdcap` CLI commands (`probe`, `eio-read`, `ela-dump`, `uart`, …) are sequences of these
+The `swdcap` CLI commands (`probe`, `eio-read` and `eio-write` in v0.1) are sequences of these
 `dap apreg` transactions. Swapping the Pi Debug Probe for an MCU-Link does not change the Tcl.
 
-- **Tested:** CMSIS-DAP.
+- **Tested (the gateway, with a RISC-V Debug Module behind it):** CMSIS-DAP.
 - **Should work, untested:** other OpenOCD adapters with raw SWD/DAP access (J-Link via the `jlink`
   driver, FTDI SWD, ST-Link in `dapdirect_swd` mode).
 - **Will not work:** ST-Link in HLA mode.
@@ -126,9 +132,10 @@ The `swdcap` CLI commands (`probe`, `eio-read`, `ela-dump`, `uart`, …) are seq
 
 ### What this replaces
 
-One Pmod session covers four jobs that otherwise need spare pins or a vendor JTAG USER chain:
+One Pmod session covers jobs that otherwise need spare pins or a vendor JTAG USER chain. v0.1
+covers the first; the other three come with later releases:
 
-- **GPIO.** `eio-read` / `eio-write` on whatever is tied to the EIO port.
+- **GPIO (v0.1).** `eio-read` / `eio-write` on whatever is tied to the EIO port.
 - **Fabric capture.** Arm the small ELA and dump a VCD. 32-bit probes, depth 256 or 1024; not a
   full ILA.
 - **Bus peek.** One outstanding Wishbone read or write. A bad target address sets STAT, not
@@ -140,6 +147,6 @@ It does not program the FPGA. It does not debug a CPU unless a Debug Module is l
 
 ### Security
 
-Anyone with a probe on the Pmod gets EIO drive and, with the Wishbone bridge, bus-master access to
-the fabric. Leave swdcap out of production bitstreams, or at least generate it without
-`WbBridge`.
+Anyone with a probe on the Pmod gets EIO drive and, once the Wishbone bridge exists and is
+generated, bus-master access to the fabric. Leave swdcap out of production bitstreams, or at
+least generate it without the bridge.

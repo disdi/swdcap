@@ -1,20 +1,30 @@
 # swdcap
 
-FPGA debug instruments over **SWD**: an fpgacapZero-style toolkit (EIO, small logic
-analyzer, bus bridge, UART) reached through two wires (SWCLK + SWDIO) instead of JTAG.
+Debug instruments over **SWD**: an fpgacapZero-style toolkit reached through two wires
+(SWCLK + SWDIO) instead of JTAG.
 
-The FPGA is the SWD **target**. Any CMSIS-DAP probe is the master, driven by stock OpenOCD.
+**v0.1** is the SWD gateway, an ID window and EIO (drive and sample pins). A small logic
+analyzer, a Wishbone bridge and a UART are planned for later releases.
+
+The FPGA (or chip) is the SWD **target**. Any CMSIS-DAP probe is the master, driven by stock OpenOCD.
 
 ```
 OpenOCD (dap apreg) + swdcap CLI
   -> CMSIS-DAP probe
-  -> SW-DP + DMI gateway AP   (SpinalHDL spinal.lib.com.swd / DebugTransportModuleSwd, unchanged)
-  -> DMI bus -> ID · EIO · ELA · bus bridge · UART
+  -> SW-DP + DMI gateway AP   (SpinalHDL spinal.lib.com.swd + SwdDmiGateway, unchanged)
+  -> DMI bus -> ID · EIO      (v0.1)
+             -> ELA · Wishbone bridge · UART   (later, reserved windows)
 ```
 
 ## Status
 
-Planning. No RTL or host code yet. The first bring-up target is a Digilent Arty A7.
+Planning. No RTL or host code yet.
+
+Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then a Tiny Tapeout
+(SKY130) wrapper once EIO works on both.
+
+- [Plan](swdcap-plan.md)
+- [Integration guide](docs/integration.md)
 
 ## Scope
 
