@@ -35,3 +35,19 @@ proc p1_check {} {
 
 	echo "PASS: P1 check"
 }
+
+# Stability loop: n SCRATCH write / read-back pairs with changing data, with a MAGIC read mixed in.
+proc p1_stress {{n 1000}} {
+	set v 0x1234abcd
+	for {set i 0} {$i < $n} {incr i} {
+		set v [expr {($v * 1103515245 + 12345) & 0xffffffff}]
+		swdcap_wr 0x0107 $v
+		set got [swdcap_rd 0x0107]
+		if {$got != $v} { p1_fail [format "stress %d: SCRATCH wrote 0x%08x, read 0x%08x" $i $v $got] }
+		if {($i & 0x3f) == 0} {
+			set magic [swdcap_rd 0x0100]
+			if {$magic != 0x43445753} { p1_fail [format "stress %d: MAGIC 0x%08x" $i $magic] }
+		}
+	}
+	echo "PASS: P1 stress, $n iterations"
+}

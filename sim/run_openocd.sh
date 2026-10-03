@@ -26,7 +26,7 @@ done
 grep -q "listening on localhost:${port}" "simWorkspace/sim_${shape}.log" || { echo "simulation did not start"; exit 1; }
 
 set +e
-"${openocd}" -f sim/openocd_sim.cfg -f openocd/swdcap.cfg -f sim/p1_check.tcl \
+"${openocd}" -f sim/openocd_sim.cfg -f openocd/swdcap.cfg -f openocd/p1_check.tcl \
 	-c "init" -c "p1_check" -c "shutdown" 2>&1 | tee "${log}"
 set -e
 

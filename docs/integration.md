@@ -61,7 +61,8 @@ BB    u_swdio (.B(pmod_swdio),  .I(swdio_o), .O(swdio_i), .T(~swdio_oe));
 ```
 
 In LiteX, use a `TSTriple` on the platform pad and an `Instance("SwdcapTop", …)`.
-`litex/swdcap_arty.py` is the reference wrapper.
+`boards/arty/swdcap_arty.py` is the reference wrapper; `constr/arty_jb.xdc` has the same
+constraints for a design that does not use LiteX.
 
 The address map lives inside `SwdcapTop`. The design does not assign DMI addresses, and
 `0x0000–0x007F` is reserved for a later Debug Module.

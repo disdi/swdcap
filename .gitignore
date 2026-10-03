@@ -10,3 +10,5 @@ tmp/
 *.class
 *.vcd
 *.fst
+build/
+prog/

@@ -293,30 +293,36 @@ under Verilator, in two shapes: `fpga` (16-bit DMI address, BOOT-reset SWCLK dom
   used for the RISC-V gateway, so the repo needs no LiteX.
 - `gen/SwdcapTop.v` is the `fpga` shape: about 530 flops without EIO.
 
-**P1b Arty.** Before loading the new image, load a known-good reference bitstream for the same harness and
-confirm it passes, to prove the rig. Then, with
-the Pi Debug Probe:
+**P1b Arty. Done 2026-10-03** on an Arty A7-35T with the MCU-Link (CMSIS-DAP) on the JB harness,
+with a Pmod TPH2 in the SWD path.
+
+- The known-good reference bitstream for the harness passed first (10 of 10), so the rig was
+  healthy.
+- `boards/arty/swdcap_arty.py --build --load`: a minimal LiteX SoC (no CPU) around
+  `gen/SwdcapTop.v`. Timing met (WNS 1.19 ns at 100 MHz); `SwdcapTop` uses 210 LUTs and 503
+  flip-flops.
+- Check, with stock OpenOCD:
 
 ```
-source [find interface/cmsis-dap.cfg]
-transport select swd
-adapter speed 1000
-swd newdap swdcap cpu -expected-id 0x0ba11aab
-dap create swdcap.dap -chain-position swdcap.cpu
-init
-
-proc swdcap_rd {a}   { swdcap.dap apreg 0 0x04 $a; return [swdcap.dap apreg 0 0x08] }
-proc swdcap_wr {a v} { swdcap.dap apreg 0 0x04 $a; swdcap.dap apreg 0 0x08 $v }
-
-echo [format "AP_IDR   0x%08x" [swdcap.dap apreg 0 0x00]]   ;# expect 0x74726976
-echo [format "MAGIC    0x%08x" [swdcap_rd 0x0100]]           ;# expect 0x43445753
-echo [format "dmstatus 0x%08x" [swdcap_rd 0x0011]]           ;# expect 0 (no DM)
-swdcap_wr 0x0107 0xa5a5a5a5
-echo [format "SCRATCH  0x%08x" [swdcap_rd 0x0107]]
-swdcap_rd 0x4000                                             ;# unmapped: expect STICKYERR
+openocd -f interface/cmsis-dap.cfg -c "transport select swd" -c "adapter speed 1000" \
+        -f openocd/swdcap.cfg -f openocd/p1_check.tcl \
+        -c init -c p1_check -c "p1_stress 2000" -c shutdown
 ```
 
-**Exit:**
+| Debug clock | SWCLK | `p1_check` | `p1_stress 2000` |
+|---|---|---|---|
+| 100 MHz (above SWCLK) | 1 MHz | pass | pass |
+| 100 MHz (above SWCLK) | 4 MHz | pass | pass |
+| 390.6 kHz (`--debug-clk-div 256`, below SWCLK) | 1 MHz | pass | pass |
+| 390.6 kHz (`--debug-clk-div 256`, below SWCLK) | 4 MHz | pass | pass |
+
+`p1_check` identifies the target (DPIDR, AP_IDR, MAGIC, VERSION 0.1.0, FEATURES 0, DMI_ADDR 16
+bits), exercises SCRATCH, reads `dmstatus` as 0, and checks that `0x0300` errors on read and write
+and that the link recovers. `p1_stress` is 2000 SCRATCH write / read-back pairs with changing
+data. The `silicon` shape (10-bit, async reset) is verified in simulation only so far; it runs on
+the Arty in PT.
+
+**Exit (all met in sim and on the Arty):**
 - DPIDR, AP_IDR and MAGIC stable.
 - Scratch read/write stable at 1 MHz. 4 MHz is an Arty-only stretch; Tiny Tapeout stays at 1 MHz.
 - An access to `0x0300` sets STICKYERR, and the next access after ABORT succeeds. This must also
@@ -443,14 +449,18 @@ swdcap/
                                   swclk, swdio_i / swdio_o / swdio_oe (pad is the design's), plus
                                   instrument ports. Header records the SpinalHDL commit and the
                                   generator options
-  litex/swdcap_arty.py            stock LiteX-Boards digilent_arty target + two SWD pads on JB
+  boards/arty/swdcap_arty.py      minimal LiteX SoC (stock Arty platform and clocking, no CPU) +
+                                  two SWD pads on JB; --debug-clk-div for a slow debug clock.
+                                  Not in a directory called litex/, which would shadow the
+                                  LiteX Python package
   tt/                        PT   Tiny Tapeout: info.yaml, src/tt_um_*_swdcap.v wrapper,
                                   two-clock SDC, test/ gate-level sim (or a separate repo from
                                   the TT template; decided in PT)
-  constr/arty_jb.xdc              SWCLK = JB3 (D15, clock-capable), SWDIO = JB7 (J17) with
-                                  PULLUP; create_clock on SWCLK, async to sys_clk
+  constr/arty_jb.xdc              the same pad and clock constraints for a non-LiteX design
+                                  (derived from the verified LiteX build; not run by itself)
   openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr / swdcap_probe /
                                   swdcap_addr_width
+  openocd/p1_check.tcl            p1_check and p1_stress, used in simulation and on hardware
   py/
     pyproject.toml                package "swdcap", console entry point `swdcap`
     swdcap/cli.py                 probe, eio-read / eio-write
