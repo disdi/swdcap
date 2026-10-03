@@ -151,7 +151,7 @@ Properties swdcap inherits and must design around:
 | `0x0101` | VERSION | `major[31:16] minor[15:8] patch[7:0]` |
 | `0x0102` | FEATURES | bit 0 EIO (set in v0.1), 1 ELA, 2 UART, 3 BUS_WB, 4 BUS_AXI, 5 DM present |
 | `0x0103` | DEBUG_CLK_HZ | Instrument (DebugBus) clock |
-| `0x0104` | EIO_WIDTH | `out[15:8]`, `in[7:0]`: number of EIO output and input bits (TT: 8 out, 7 in) |
+| `0x0104` | EIO_WIDTH | `out[15:8]`, `in[7:0]`: number of EIO output and input bits (TT: 8 out, 8 in) |
 | `0x0105` | ELA_WIDTH | Probe width (bits) |
 | `0x0106` | ELA_DEPTH | Samples |
 | `0x0107` | SCRATCH | R/W, reset `0` |
@@ -171,9 +171,12 @@ that harness can check the rig before every bring-up:
 | GND | JB11 | |
 | GND (second) | JB5 ← breakout JP2.3 | Required. Without it the DP is double-clocked |
 | VTREF | JB12 (3V3) | **Target supplies it, the probe senses it.** MCU-Link needs it wired. The Pi Debug Probe has no VTREF pin; leave it open |
-| nRESET (opt.) | TBD in P0 | Open-drain. Not adjacent to JB3/JB7 |
 
-Direct wires only; a PmodTPH2 pass-through kills the link.
+A Pmod TPH2 in the SWD path works on the Arty: the known-good reference bitstream passed its
+full check, including the GDB lane, through one on 2026-10-03 (MCU-Link). An earlier TPH2
+module or its leads passed no signal at all, so re-run the reference check after inserting one.
+On the Arty the SWDIO pull-up is the FPGA's internal one (XDC), so the TPH2 needs no resistor
+there. nRESET is not used in v0.1 on any board.
 
 **Tiny Tapeout (v0.1 silicon target).** Same core, target 1x2 SKY130 tiles. ELA, Wishbone and
 UART generated out; `addressWidth = 10`, `swdAsyncReset = true`. Probe at 1 MHz to start. The mux
@@ -181,18 +184,56 @@ round trip is about 20 ns, which is small against the 125 ns half period at 4 MH
 ceiling is to be measured. Select the project before probing: an inactive tile has its `uio`
 tristate disabled.
 
+The SWD port sits on the **bidirectional Pmod header, on the same Pmod pins as the Arty JB
+harness** (pin 3 SWCLK, pin 7 SWDIO, pins 5 and 11 GND, pin 12 VTREF). The MCU-Link + breakout +
+TPH2 assembly verified on the Arty then plugs into the demo board unchanged, both grounds
+included, and SWCLK and SWDIO stay on different rows.
+
 | Port | Pin | Note |
 |---|---|---|
-| `swclk` | `ui_in[0]` | Probe-driven. Not the dedicated `clk` (demo-board PWM). Needs its own clock definition in the SDC |
-| `swdio_i/o/oe` | `uio_in[0]` / `uio_out[0]` / `uio_oe[0]` | **External pull-up required**: `uio` has no internal one |
-| debug clock | `clk` | |
+| `swclk` | `uio_in[2]` (Pmod pin 3) | Probe-driven, `uio_oe[2] = 0`. Not the dedicated `clk` (demo-board PWM). Needs its own clock definition in the SDC |
+| `swdio_i/o/oe` | `uio_in[4]` / `uio_out[4]` / `uio_oe[4]` (Pmod pin 7) | **External pull-up required**: `uio` has no internal one |
+| debug clock | `clk` | Must be running, or every DMI access returns WAIT |
 | debug reset | `rst_n` | Active-low. Also the async reset of the SWCLK domain |
-| EIO in | `ui_in[7:1]` | 7 bits |
+| EIO in | `ui_in[7:0]` | 8 bits |
 | EIO out | `uo_out[7:0]` | 8 bits |
-| unused | `uio[7:1]` | `uio_oe = 0`, `uio_out = 0` |
+| unused | `uio[0]`, `uio[1]`, `uio[3]`, `uio[5]`, `uio[6]`, `uio[7]` | `uio_oe = 0`, `uio_out = 0` |
 
-On the TT demo board the RP2040 also connects to `ui_in` and `uio`. It must leave `ui_in[0]` and
-`uio[0]` undriven while an external probe is attached.
+This assumes the demo board's bidirectional header follows the standard Pmod layout (`uio[0..3]`
+on pins 1–4, `uio[4..7]` on pins 7–10). Confirm it against the demo-board pinout in PT before the
+pin map is frozen.
+
+On the TT demo board the RP2040 also connects to `uio`. It must leave `uio[2]` and `uio[4]`
+undriven while an external probe is attached (`uio_oe_pico` bits 2 and 4 clear).
+
+**MCU-Link on the demo board.** CMSIS-DAP firmware. The board is USB-powered, so the probe must not
+power it; if your MCU-Link has a target-power option, leave it off. Both sides are 3.3 V once
+VTREF is tied to the board rail, so no level shifter is needed.
+
+| MCU-Link 10-pin | Signal | Bidirectional Pmod header |
+|---|---|---|
+| 1 | VTREF | Pin 12, 3.3 V. The probe senses it; open VTREF means no SWD |
+| 2 | SWDIO | Pin 7, `uio[4]`; same node as the pull-up |
+| 4 | SWCLK | Pin 3, `uio[2]`; not the dedicated `clk` |
+| 3 and 5 | GND | Pins 5 and 11. Use both |
+| 10 | nRESET | Leave open |
+
+The pull-up is 10 kΩ to 100 kΩ from the SWDIO test point of the TPH2 to the header's 3.3 V. It is
+not in series with SWDIO. The TPH2 itself is verified on the Arty; confirm it on the demo board
+with the first probe.
+
+Bring-up order on the demo board:
+
+1. Select the project.
+2. Start `clk`.
+3. Pulse `rst_n` low, then release it.
+4. `adapter speed 1000`, then `swdcap probe`: expect `AP_IDR 0x74726976` and magic `0x43445753`.
+5. `swdcap eio-write <value>`, then `swdcap eio-read`.
+
+With `clk` stopped, DPIDR and AP_IDR still read, but every DMI access returns WAIT.
+
+A Black Magic Probe finds the gateway but no Debug Module, so it reports no target and cannot
+reach EIO.
 
 With `addressWidth = 10`, DMI_ADDR holds only 10 bits, so `0x0400` and above alias into
 `0x0000–0x03FF` instead of returning STICKYERR. The host reads the DMI_ADDR width (write
@@ -215,7 +256,6 @@ PMOD1 (SWCLK J3, SWDIO K2). PMOD2 M5/T4 is taken by the UART console (Machdyne S
 - Generator default: `withEio = true`, `withEla = withWb = withUart = false`,
   `addressWidth = 16`, `swdAsyncReset = false`. The Tiny Tapeout wrapper overrides the last two.
 - Wishbone, not AXI, if the bus bridge is generated later.
-- Pick the nRESET pin.
 
 ### P1 — gateway + ID window
 
@@ -271,10 +311,13 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
 - **Trims if 1x2 does not hold**, in this order: `addressWidth = 10`, a narrower SCRATCH, no EIO
   output-enable register.
 - **Wrapper.** `tt_um_*` top with the pin map above, `info.yaml`, unused `uio` tied off.
+- **Pull-up rehearsal.** On the Arty, turn off the internal SWDIO pull-up in the XDC and fit the
+  same 10 kΩ–100 kΩ resistor on the TPH2's SWDIO test point. That is the electrical setup the
+  chip will have.
 - **Reset.** `swdAsyncReset = true`; see **SWCLK-domain reset**. Re-run the P1/P2 checks with this
   variant in simulation and on the Arty (a button as `rst_n`) before hardening, so the
   configuration that goes to silicon has run on hardware.
-- **Constraints.** Two clocks: `clk` and SWCLK on `ui_in[0]`, asynchronous to each other. Confirm
+- **Constraints.** Two clocks: `clk` and SWCLK on `uio_in[2]`, asynchronous to each other. Confirm
   how the TT flow accepts a custom SDC for the second clock and its clock tree.
 - **Gate-level simulation** with an SWD host model and X-initialised flops: reset, line reset,
   DPIDR, AP_IDR, MAGIC, scratch, EIO, reserved-window STICKYERR and recovery after ABORT.
@@ -389,8 +432,10 @@ on adjacent pins.
 | P1 core does not fit 1x2 SKY tiles | ELA / WB / UART generated out; area check first in PT (about 550 flops estimated); trims: `addressWidth = 10`, narrower SCRATCH, no EIO OE |
 | Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`; gate-level sim with X-initialised flops |
 | SWCLK on a data pin has no clock constraints or tree | Two-clock SDC in PT; confirm TT flow support before the shuttle deadline |
-| SWDIO floats on TT (no internal pull-up) | External pull-up on `uio[0]`; documented in the wrapper README |
-| RP2040 on the TT demo board drives `ui_in[0]` / `uio[0]` | Leave those pins undriven while an external probe is attached |
+| SWDIO floats on TT (no internal pull-up) | 10 kΩ–100 kΩ from `uio[4]` to 3.3 V, on a TPH2 test point, not in series; rehearsed on the Arty in PT |
+| RP2040 on the TT demo board drives `uio[2]` / `uio[4]` | Keep `uio_oe_pico` bits 2 and 4 clear while an external probe is attached |
+| Demo-board `clk` stopped or `rst_n` never pulsed | Bring-up order in the pinout section: select, start `clk`, pulse `rst_n`, then probe |
+| TT bidirectional header does not follow the assumed Pmod layout | Confirm against the demo-board pinout in PT before freezing the pin map |
 | Tools mistake the gateway for a CPU | DM range reads 0 → `dmstatus.version = 0`; documented in the README |
 | `dap info` output misleads users | Documented; `swdcap probe` is the supported identification path |
 | Later bus bridge wedges the DAP | When generated, Wishbone ERR goes in STAT, not STICKYERR |
