@@ -1,6 +1,6 @@
 // Generator : SpinalHDL dev    git head : 90b7d8eeed46e20e102df498516ebe845c9e4a6e
 // Component : SwdcapTop
-// Git hash  : 609716855b2662cce6a013c3ac408bc3667d0573
+// Git hash  : 324e08a9e53fd7627d3cb964f72b878e021dab45
 
 `timescale 1ns/1ps
 
@@ -9,11 +9,14 @@ module SwdcapTop (
   input  wire          swdio_i,
   output wire          swdio_o,
   output wire          swdio_oe,
+  input  wire [7:0]    eio_in,
+  output wire [7:0]    eio_out,
   input  wire          clk,
   input  wire          reset
 );
 
   wire                decoder_id_io_bus_sel;
+  wire                decoder_eio_io_bus_sel;
   wire                core_io_swdio_write;
   wire                core_io_swdio_writeEnable;
   wire                core_io_ap_cmd_valid;
@@ -30,6 +33,9 @@ module SwdcapTop (
   wire       [31:0]   gateway_systemLogic_bus_rsp_ccToggle_io_output_payload_data;
   wire       [31:0]   decoder_id_io_bus_rdata;
   wire                decoder_id_io_bus_error;
+  wire       [31:0]   decoder_eio_io_bus_rdata;
+  wire                decoder_eio_io_bus_error;
+  wire       [7:0]    decoder_eio_io_eio_out;
   wire                gateway_swdLogic_apCmd_valid;
   wire                gateway_swdLogic_apCmd_payload_rnw;
   wire       [1:0]    gateway_swdLogic_apCmd_payload_addr;
@@ -85,8 +91,9 @@ module SwdcapTop (
   reg                 decoder_rsp_payload_error;
   reg        [31:0]   decoder_rsp_payload_data;
   wire                gateway_systemLogic_bus_cmd_fire;
-  wire                when_SwdcapTop_l76;
-  wire                when_SwdcapTop_l85;
+  wire                when_SwdcapTop_l77;
+  wire                when_SwdcapTop_l86;
+  wire                when_SwdcapTop_l99;
   reg                 decoder_rsp_stage_valid;
   reg                 decoder_rsp_stage_payload_error;
   reg        [31:0]   decoder_rsp_stage_payload_data;
@@ -136,6 +143,18 @@ module SwdcapTop (
     .io_bus_wdata  (gateway_systemLogic_bus_cmd_payload_data[31:0]), //i
     .io_bus_rdata  (decoder_id_io_bus_rdata[31:0]                 ), //o
     .io_bus_error  (decoder_id_io_bus_error                       ), //o
+    .clk           (clk                                           ), //i
+    .reset         (reset                                         )  //i
+  );
+  Eio decoder_eio (
+    .io_bus_sel    (decoder_eio_io_bus_sel                        ), //i
+    .io_bus_write  (gateway_systemLogic_bus_cmd_payload_write     ), //i
+    .io_bus_offset (decoder_offset[7:0]                           ), //i
+    .io_bus_wdata  (gateway_systemLogic_bus_cmd_payload_data[31:0]), //i
+    .io_bus_rdata  (decoder_eio_io_bus_rdata[31:0]                ), //o
+    .io_bus_error  (decoder_eio_io_bus_error                      ), //o
+    .io_eio_in     (eio_in[7:0]                                   ), //i
+    .io_eio_out    (decoder_eio_io_eio_out[7:0]                   ), //o
     .clk           (clk                                           ), //i
     .reset         (reset                                         )  //i
   );
@@ -196,24 +215,33 @@ module SwdcapTop (
   assign decoder_rsp_valid = gateway_systemLogic_bus_cmd_fire;
   always @(*) begin
     decoder_rsp_payload_error = 1'b1;
-    if(when_SwdcapTop_l76) begin
+    if(when_SwdcapTop_l77) begin
       decoder_rsp_payload_error = 1'b0;
     end
-    if(when_SwdcapTop_l85) begin
+    if(when_SwdcapTop_l86) begin
       decoder_rsp_payload_error = decoder_id_io_bus_error;
+    end
+    if(when_SwdcapTop_l99) begin
+      decoder_rsp_payload_error = decoder_eio_io_bus_error;
     end
   end
 
   always @(*) begin
     decoder_rsp_payload_data = 32'h0;
-    if(when_SwdcapTop_l85) begin
+    if(when_SwdcapTop_l86) begin
       decoder_rsp_payload_data = decoder_id_io_bus_rdata;
+    end
+    if(when_SwdcapTop_l99) begin
+      decoder_rsp_payload_data = decoder_eio_io_bus_rdata;
     end
   end
 
-  assign when_SwdcapTop_l76 = ((decoder_window == 8'h0) && (decoder_offset <= 8'h7f));
+  assign when_SwdcapTop_l77 = ((decoder_window == 8'h0) && (decoder_offset <= 8'h7f));
   assign decoder_id_io_bus_sel = (gateway_systemLogic_bus_cmd_fire && (decoder_window == 8'h01));
-  assign when_SwdcapTop_l85 = (decoder_window == 8'h01);
+  assign when_SwdcapTop_l86 = (decoder_window == 8'h01);
+  assign decoder_eio_io_bus_sel = (gateway_systemLogic_bus_cmd_fire && (decoder_window == 8'h02));
+  assign eio_out = decoder_eio_io_eio_out;
+  assign when_SwdcapTop_l99 = (decoder_window == 8'h02);
   assign gateway_systemLogic_bus_rsp_valid = decoder_rsp_stage_valid;
   assign gateway_systemLogic_bus_rsp_payload_error = decoder_rsp_stage_payload_error;
   assign gateway_systemLogic_bus_rsp_payload_data = decoder_rsp_stage_payload_data;
@@ -290,6 +318,81 @@ module SwdcapTop (
 
 endmodule
 
+module Eio (
+  input  wire          io_bus_sel,
+  input  wire          io_bus_write,
+  input  wire [7:0]    io_bus_offset,
+  input  wire [31:0]   io_bus_wdata,
+  output reg  [31:0]   io_bus_rdata,
+  output reg           io_bus_error,
+  input  wire [7:0]    io_eio_in,
+  output wire [7:0]    io_eio_out,
+  input  wire          clk,
+  input  wire          reset
+);
+
+  wire       [7:0]    io_eio_in_buffercc_io_dataOut;
+  wire       [7:0]    inSync;
+  reg        [7:0]    outReg;
+  wire                when_Eio_l31;
+
+  (* keep_hierarchy = "TRUE" *) BufferCC_2 io_eio_in_buffercc (
+    .io_dataIn  (io_eio_in[7:0]                    ), //i
+    .io_dataOut (io_eio_in_buffercc_io_dataOut[7:0]), //o
+    .clk        (clk                               ), //i
+    .reset      (reset                             )  //i
+  );
+  assign inSync = io_eio_in_buffercc_io_dataOut;
+  assign io_eio_out = outReg;
+  always @(*) begin
+    io_bus_rdata = 32'h0;
+    case(io_bus_offset)
+      8'h0 : begin
+        io_bus_rdata = {24'd0, inSync};
+      end
+      8'h01 : begin
+        io_bus_rdata = {24'd0, outReg};
+      end
+      default : begin
+      end
+    endcase
+  end
+
+  always @(*) begin
+    io_bus_error = 1'b0;
+    case(io_bus_offset)
+      8'h0 : begin
+      end
+      8'h01 : begin
+      end
+      default : begin
+        io_bus_error = 1'b1;
+      end
+    endcase
+  end
+
+  assign when_Eio_l31 = (io_bus_sel && io_bus_write);
+  always @(posedge clk or posedge reset) begin
+    if(reset) begin
+      outReg <= 8'h0;
+    end else begin
+      case(io_bus_offset)
+        8'h0 : begin
+        end
+        8'h01 : begin
+          if(when_Eio_l31) begin
+            outReg <= io_bus_wdata[7:0];
+          end
+        end
+        default : begin
+        end
+      endcase
+    end
+  end
+
+
+endmodule
+
 module IdWindow (
   input  wire          io_bus_sel,
   input  wire          io_bus_write,
@@ -314,13 +417,13 @@ module IdWindow (
         io_bus_rdata = 32'h00000100;
       end
       8'h02 : begin
-        io_bus_rdata = 32'h0;
+        io_bus_rdata = 32'h00000001;
       end
       8'h03 : begin
         io_bus_rdata = 32'h0;
       end
       8'h04 : begin
-        io_bus_rdata = 32'h0;
+        io_bus_rdata = 32'h00000808;
       end
       8'h05 : begin
         io_bus_rdata = 32'h0;
@@ -616,6 +719,25 @@ module SwdPhyDp (
   assign io_ap_cmd_payload_addr = dp_io_ap_cmd_payload_addr;
   assign io_ap_cmd_payload_apSel = dp_io_ap_cmd_payload_apSel;
   assign io_ap_cmd_payload_wdata = dp_io_ap_cmd_payload_wdata;
+
+endmodule
+
+module BufferCC_2 (
+  input  wire [7:0]    io_dataIn,
+  output wire [7:0]    io_dataOut,
+  input  wire          clk,
+  input  wire          reset
+);
+
+  (* async_reg = "true" *) reg        [7:0]    buffers_0;
+  (* async_reg = "true" *) reg        [7:0]    buffers_1;
+
+  assign io_dataOut = buffers_1;
+  always @(posedge clk) begin
+    buffers_0 <= io_dataIn;
+    buffers_1 <= buffers_0;
+  end
+
 
 endmodule
 

@@ -15,17 +15,18 @@ import spinal.lib.cpu.riscv.debug._
  *
  * Ports: clk / reset are the debug clock and reset (decoder, instruments, far side of the CDC).
  * swclk clocks the SWD side. swdio is exposed as i / o / oe; the pad belongs to the design.
+ * eio_in / eio_out exist when EIO is generated. Tie every eio_in bit; nothing is left to float.
  */
 case class SwdcapTop(c: SwdcapConfig) extends Component {
   import SwdcapRegs._
-
-  require(!c.withEio, "EIO is implemented in P2; generate with withEio = false until then")
 
   val io = new Bundle {
     val swclk    = in  Bool()
     val swdio_i  = in  Bool()
     val swdio_o  = out Bool()
     val swdio_oe = out Bool()
+    val eio_in   = c.withEio generate in(Bits(c.eioInWidth bits))
+    val eio_out  = c.withEio generate out(Bits(c.eioOutWidth bits))
   }
   noIoPrefix()
 
@@ -87,11 +88,25 @@ case class SwdcapTop(c: SwdcapConfig) extends Component {
       rsp.data  := id.io.bus.rdata
     }
 
+    val eio = c.withEio generate Eio(c)
+    if (c.withEio) {
+      eio.io.bus.sel    := bus.cmd.fire && window === (EIO_BASE >> 8)
+      eio.io.bus.write  := bus.cmd.write
+      eio.io.bus.offset := offset
+      eio.io.bus.wdata  := bus.cmd.data
+      eio.io.eio_in     := io.eio_in
+      io.eio_out        := eio.io.eio_out
+      when(window === (EIO_BASE >> 8)) {
+        rsp.error := eio.io.bus.error
+        rsp.data  := eio.io.bus.rdata
+      }
+    }
+
     bus.rsp << rsp.stage()
   }
 }
 
 /** Generates gen/SwdcapTop.v, the netlist a non-SpinalHDL design instantiates. */
 object SwdcapTopVerilog extends App {
-  SpinalConfig(targetDirectory = "gen").generateVerilog(SwdcapTop(SwdcapConfig(withEio = false)))
+  SpinalConfig(targetDirectory = "gen").generateVerilog(SwdcapTop(SwdcapConfig()))
 }

@@ -22,6 +22,7 @@ class SwdHarness(val dut: SwdcapTop, debugPeriod: Int) {
   def start(): Unit = {
     dut.io.swclk   #= false
     dut.io.swdio_i #= false
+    if (dut.c.withEio) dut.io.eio_in #= 0
     dut.clockDomain.forkStimulus(period = debugPeriod)
     dut.clockDomain.waitSampling(10)          // debug reset released
     drv.lineReset()                           // what a host does first
@@ -177,7 +178,8 @@ abstract class SwdcapTopSimBase(name: String, c: SwdcapConfig) extends AnyFunSui
   sim("unmapped words and windows that are not generated return an error, and ABORT recovers") { h =>
     // Each of these is addressable with addressWidth = 10. FEATURES, not the address, says
     // whether a window exists.
-    for (a <- Seq(0x0080, 0x00FF, ID_SCRATCH + 1, 0x01FF, EIO_BASE, EIO_OUT, 0x02FF, ELA_BASE, 0x03FF)) {
+    val eioWords = if (c.withEio) Seq(EIO_OUT + 1) else Seq(EIO_BASE, EIO_OUT)
+    for (a <- Seq(0x0080, 0x00FF, ID_SCRATCH + 1, 0x01FF, 0x02FF, ELA_BASE, 0x03FF) ++ eioWords) {
       h.expectReadError(a)
       assert(h.read(ID_MAGIC) == MAGIC, "the next access after ABORT must work")
     }
@@ -193,6 +195,37 @@ abstract class SwdcapTopSimBase(name: String, c: SwdcapConfig) extends AnyFunSui
     assert(h.read(ID_MAGIC) == MAGIC)
   }
 
+  if (c.withEio) {
+    val inMask  = (BigInt(1) << c.eioInWidth) - 1
+    val outMask = (BigInt(1) << c.eioOutWidth) - 1
+
+    sim("EIO_OUT drives the eio_out port and reads back") { h =>
+      assert(h.read(EIO_OUT) == 0 && h.dut.io.eio_out.toBigInt == 0, "EIO_OUT resets to 0")
+      for (v <- Seq(BigInt(1), BigInt("A5A5A5A5", 16), BigInt("5A5A5A5A", 16), BigInt("FFFFFFFF", 16), BigInt(0))) {
+        assert(h.dmiWrite(EIO_OUT, v))
+        assert(h.dut.io.eio_out.toBigInt == (v & outMask), "eio_out port")
+        assert(h.read(EIO_OUT) == (v & outMask), "EIO_OUT read-back; bits above the width read 0")
+      }
+    }
+
+    sim("EIO_IN samples the eio_in port") { h =>
+      for (v <- Seq(BigInt(1), BigInt("A5A5A5A5", 16) & inMask, BigInt("5A5A5A5A", 16) & inMask, inMask, BigInt(0))) {
+        h.dut.io.eio_in #= v
+        h.dut.clockDomain.waitSampling(4)            // through the synchroniser
+        assert(h.read(EIO_IN) == v)
+      }
+    }
+
+    sim("EIO_IN is read-only and does not disturb EIO_OUT") { h =>
+      h.dut.io.eio_in #= 0x3 & inMask
+      assert(h.dmiWrite(EIO_OUT, 0x5 & outMask))
+      assert(h.dmiWrite(EIO_IN, BigInt("FFFFFFFF", 16)), "a write to EIO_IN is ignored without an error")
+      assert(h.read(EIO_IN) == (0x3 & inMask))
+      assert(h.read(EIO_OUT) == (0x5 & outMask))
+      assert(!h.stickyErr)
+    }
+  }
+
   sim("a line reset in the middle of a session keeps the link usable") { h =>
     assert(h.dmiWrite(ID_SCRATCH, BigInt("CAFEF00D", 16)))
     h.drv.lineReset()
@@ -202,8 +235,8 @@ abstract class SwdcapTopSimBase(name: String, c: SwdcapConfig) extends AnyFunSui
   }
 }
 
-/** FPGA shape: 16-bit DMI address, BOOT-reset SWCLK domain. */
-class SwdcapTopFpgaSim extends SwdcapTopSimBase("fpga", SwdcapConfig(withEio = false)) {
+/** FPGA shape: 16-bit DMI address, BOOT-reset SWCLK domain, 8 in / 8 out. */
+class SwdcapTopFpgaSim extends SwdcapTopSimBase("fpga", SwdcapConfig()) {
   import SwdcapRegs._
 
   sim("the reserved windows beyond 10 bits return an error") { h =>
@@ -216,7 +249,7 @@ class SwdcapTopFpgaSim extends SwdcapTopSimBase("fpga", SwdcapConfig(withEio = f
 
 /** Tiny Tapeout shape: 10-bit DMI address, SWCLK domain reset from the debug reset, narrow scratch. */
 class SwdcapTopSiliconSim extends SwdcapTopSimBase("silicon",
-    SwdcapConfig.tinyTapeout.copy(withEio = false, scratchWidth = 8)) {
+    SwdcapConfig.tinyTapeout.copy(scratchWidth = 8)) {
   import SwdcapRegs._
   import SwdAckSim._
 
@@ -229,6 +262,7 @@ class SwdcapTopSiliconSim extends SwdcapTopSimBase("silicon",
 
   sim("the debug reset also resets the SWD side") { h =>
     assert(h.dmiWrite(ID_SCRATCH, 0x5A))
+    assert(h.dmiWrite(EIO_OUT, 0xC3))
     assert(h.dmiRead(ELA_BASE).isLeft && h.stickyErr, "leave STICKYERR set")
     assert(h.dpWrite(2, BigInt("FF0000F0", 16)) == OK, "leave SELECT non-zero")
 
@@ -241,5 +275,12 @@ class SwdcapTopSiliconSim extends SwdcapTopSimBase("silicon",
     assert(!h.stickyErr, "reset must clear STICKYERR without an ABORT")
     assert(h.read(ID_MAGIC) == MAGIC)
     assert(h.read(ID_SCRATCH) == 0, "reset must clear SCRATCH")
+    assert(h.read(EIO_OUT) == 0 && h.dut.io.eio_out.toBigInt == 0, "reset must clear EIO_OUT")
   }
 }
+
+/** Without EIO: FEATURES bit 0 is clear and the EIO window returns an error. */
+class SwdcapTopNoEioSim extends SwdcapTopSimBase("noeio", SwdcapConfig(withEio = false))
+
+/** Uneven EIO widths: 4 inputs, 12 outputs. Bits above each width read 0. */
+class SwdcapTopWideEioSim extends SwdcapTopSimBase("eio4x12", SwdcapConfig(eioInWidth = 4, eioOutWidth = 12))

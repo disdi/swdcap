@@ -18,15 +18,16 @@ OpenOCD (dap apreg) + swdcap CLI
 
 ## Status
 
-P0 (the register contract) and P1 (gateway + ID window) are done: in simulation, and on a Digilent
-Arty A7 with an MCU-Link at 1 and 4 MHz, with the debug clock above and below SWCLK. EIO is next
-(P2).
+P0 (the register contract), P1 (gateway + ID window) and P2 (EIO) are done: in simulation, and on
+a Digilent Arty A7 with an MCU-Link at 1 and 4 MHz. The v0.1 instruments are complete on FPGA.
+The Tiny Tapeout wrapper is next.
 
 Build and test: `git submodule update --init`, then `sbt test` (needs a JDK, sbt and Verilator).
 `sim/run_openocd.sh` runs a real OpenOCD against the simulation; set `OPENOCD` to the binary.
 
 Arty A7: `boards/arty/swdcap_arty.py --build --load` (needs LiteX, litex-boards and Vivado), then
-the OpenOCD command in the [plan](swdcap-plan.md), section P1b.
+the OpenOCD command in the [plan](swdcap-plan.md), section P1b. For EIO, add
+`-f openocd/p2_check.tcl` and run `p2_check`, or use `swdcap_eio_read` / `swdcap_eio_write`.
 
 Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then a Tiny Tapeout
 (SKY130) wrapper once EIO works on both.

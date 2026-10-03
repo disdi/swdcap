@@ -277,7 +277,7 @@ Decisions taken while freezing:
 
 ### P1 — gateway + ID window
 
-**P1a sim. Done 2026-10-03.** `SwdcapTop` with the ID window only (`withEio = false` until P2),
+**P1a sim. Done 2026-10-03.** `SwdcapTop` with the ID window only (EIO was added in P2),
 under Verilator, in two shapes: `fpga` (16-bit DMI address, BOOT-reset SWCLK domain) and `silicon`
 (10-bit, SWCLK domain reset from the debug reset).
 
@@ -291,7 +291,7 @@ under Verilator, in two shapes: `fpga` (16-bit DMI address, BOOT-reset SWCLK dom
   against the same simulation, running `openocd/swdcap.cfg` and `sim/p1_check.tcl`. The server is
   `SwdRemoteBitbang` in this repo; it speaks the same protocol as the LiteX `swdremote` module
   used for the RISC-V gateway, so the repo needs no LiteX.
-- `gen/SwdcapTop.v` is the `fpga` shape: about 530 flops without EIO.
+- `gen/SwdcapTop.v` is the `fpga` shape: about 530 flops without EIO at the time of P1.
 
 **P1b Arty. Done 2026-10-03** on an Arty A7-35T with the MCU-Link (CMSIS-DAP) on the JB harness,
 with a Pmod TPH2 in the SWD path.
@@ -333,8 +333,35 @@ the Arty in PT.
 
 ### P2 — EIO
 
-Last v0.1 instrument phase (PT follows for silicon). Same job as fcapz `eio-read` / `eio-write`. Wire LEDs and buttons. The host is
-still the `swdcap_rd` / `swdcap_wr` procs. `FEATURES` bit 0 is set.
+Last v0.1 instrument phase (PT follows for silicon). Same job as fcapz `eio-read` / `eio-write`.
+
+**Done 2026-10-03**, in simulation and on the Arty A7-35T (MCU-Link, Pmod TPH2 in the SWD path).
+
+- **RTL.** `Eio.scala`: EIO_IN (`0x0200`, the `eio_in` port through a two-flop synchroniser) and
+  EIO_OUT (`0x0201`, drives `eio_out`, reset 0). `SwdcapTop` gains the `eio_in` / `eio_out` ports
+  and `FEATURES` bit 0 is set. The default netlist `gen/SwdcapTop.v` is now 8 in / 8 out.
+- **Simulation, `sbt test` (57 tests).** EIO_OUT drives the port and reads back; EIO_IN samples
+  the port; a write to EIO_IN is ignored without an error; `0x0202` errors; the debug reset
+  clears EIO_OUT. Run on four shapes: `fpga`, `silicon`, no EIO (`0x0200` errors, FEATURES 0)
+  and uneven widths (4 in / 12 out; bits above each width read 0).
+- **Real OpenOCD in simulation.** `sim/run_openocd.sh` now runs `p1_check` and
+  `p2_check loopback` (the simulation loops `eio_out` back to `eio_in`); both shapes pass.
+- **Host.** `swdcap_eio_read` / `swdcap_eio_write` in `openocd/swdcap.cfg`; `openocd/p2_check.tcl`
+  has `p2_check` and `p2_walk` (walks one lit output across the LEDs).
+- **Arty.** The reference bitstream passed first (10 of 10). `eio_out[3:0]` drive LD4–LD7 and
+  `eio_out[7:4]` the green of LD0–LD3; `eio_in[3:0]` are BTN0–BTN3 and `eio_in[7:4]` SW0–SW3.
+  Timing met (WNS 1.20 ns); `SwdcapTop` is 199 LUTs and 535 flip-flops.
+
+| Arty build | SWCLK | `p1_check` | `p2_check` | `p1_stress 500` |
+|---|---|---|---|---|
+| `--eio-loopback` (`eio_in` = `eio_out`) | 1 MHz | pass | pass, loopback mode | pass |
+| `--eio-loopback` | 4 MHz | pass | pass, loopback mode | pass |
+| normal (LEDs, buttons, switches) | 1 MHz | pass | pass | pass |
+| normal | 4 MHz | pass | pass | pass |
+
+On the normal build EIO_IN read `0xF0`: the four switches on, no button pressed. The LED walk and
+the button response are for a person at the board to confirm; the loopback build is what proves
+both directions without one.
 
 ### PT — Tiny Tapeout wrapper and hardening (v0.1)
 
@@ -461,6 +488,7 @@ swdcap/
   openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr / swdcap_probe /
                                   swdcap_addr_width
   openocd/p1_check.tcl            p1_check and p1_stress, used in simulation and on hardware
+  openocd/p2_check.tcl            p2_check (EIO, optional loopback mode) and p2_walk
   py/
     pyproject.toml                package "swdcap", console entry point `swdcap`
     swdcap/cli.py                 probe, eio-read / eio-write

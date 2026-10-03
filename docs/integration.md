@@ -5,10 +5,9 @@ master. The Pmod carries SWCLK, SWDIO and ground, plus VTREF for probes that sen
 instantiates `SwdcapTop` and ties instrument ports to real signals. There is no probe firmware, no
 OpenOCD fork, and no change to the board's JTAG or SPI configuration path.
 
-**v0.1 scope:** the gateway, the ID window and EIO. The logic analyzer (ELA), Wishbone bridge
-and UART are planned for later releases; their windows are reserved and return an error
-(STICKYERR) until they are generated. Nothing is built yet; this guide describes the planned
-interface.
+**v0.1 scope:** the gateway, the ID window and EIO, verified in simulation and on an Arty A7. The
+logic analyzer (ELA), Wishbone bridge and UART are planned for later releases; their windows are
+reserved and return an error (STICKYERR) until they are generated.
 
 ### What the design does
 
@@ -31,7 +30,7 @@ interface.
 7. Load the bitstream the way the board already loads (Vivado, `openFPGALoader`, LiteX). Until that
    bitstream is running, the probe has nothing to talk to.
 
-Port sketch (pseudocode until P1 fixes the exact instrument port names):
+v0.1 ports (`gen/SwdcapTop.v`, 8 EIO inputs and 8 outputs by default):
 
 ```verilog
 SwdcapTop u_swdcap (
@@ -41,8 +40,8 @@ SwdcapTop u_swdcap (
   .swdio_i    (swdio_i),          // from the pad
   .swdio_o    (swdio_o),          // to the pad
   .swdio_oe   (swdio_oe),         // 1 = target drives SWDIO
-  .eio_in     (buttons),
-  .eio_out    (leds)
+  .eio_in     (buttons),          // [7:0]; tie every bit
+  .eio_out    (leds)              // [7:0]
   // after v0.1, only if generated:
   // ELA: ela_clk (may differ from clk), ela_probe
   // Wishbone master: wb_cyc, wb_stb, wb_we, wb_adr, wb_dat_w, wb_dat_r, wb_ack, wb_err
@@ -119,7 +118,9 @@ Then run the procs through `-c` on the command line, the telnet port (4444) or t
 (6666, used by the `swdcap` CLI):
 
 ```tcl
-swdcap_rd 0x0100    ;# magic 0x43445753: bitstream is up
+swdcap_probe            ;# AP_IDR, magic, version, features, widths
+swdcap_eio_write 0x5    ;# drive eio_out
+swdcap_eio_read         ;# sample eio_in
 ```
 
 The `swdcap` CLI commands (`probe`, `eio-read` and `eio-write` in v0.1) are sequences of these

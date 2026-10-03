@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the P1 check with a real OpenOCD against the simulated design.
+# Runs the P1 and P2 checks with a real OpenOCD against the simulated design. The simulation loops
+# eio_out back to eio_in.
 #
 #   sim/run_openocd.sh [fpga|silicon]
 #
@@ -27,7 +28,8 @@ grep -q "listening on localhost:${port}" "simWorkspace/sim_${shape}.log" || { ec
 
 set +e
 "${openocd}" -f sim/openocd_sim.cfg -f openocd/swdcap.cfg -f openocd/p1_check.tcl \
-	-c "init" -c "p1_check" -c "shutdown" 2>&1 | tee "${log}"
+	-f openocd/p2_check.tcl \
+	-c "init" -c "p1_check" -c "p2_check loopback" -c "shutdown" 2>&1 | tee "${log}"
 set -e
 
-grep -q "^PASS: P1 check" "${log}" && ! grep -q "^FAIL" "${log}"
+grep -q "^PASS: P1 check" "${log}" && grep -q "^PASS: P2 check" "${log}" && ! grep -q "^FAIL" "${log}"

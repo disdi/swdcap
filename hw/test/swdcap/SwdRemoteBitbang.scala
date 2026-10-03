@@ -68,8 +68,8 @@ object SwdcapOpenocdSim extends App {
   val shape = args.headOption.getOrElse("fpga")
   val port  = args.lift(1).map(_.toInt).getOrElse(44854)
   val config = shape match {
-    case "fpga"    => SwdcapConfig(withEio = false)
-    case "silicon" => SwdcapConfig.tinyTapeout.copy(withEio = false)
+    case "fpga"    => SwdcapConfig()
+    case "silicon" => SwdcapConfig.tinyTapeout
     case other     => sys.error(s"unknown shape '$other', use fpga or silicon")
   }
 
@@ -80,6 +80,9 @@ object SwdcapOpenocdSim extends App {
       dut.io.swclk   #= false
       dut.io.swdio_i #= true
       dut.clockDomain.forkStimulus(period = 10)
+      // EIO loopback: eio_in follows eio_out, so that a host can check both directions.
+      dut.io.eio_in #= 0
+      dut.clockDomain.onSamplings { dut.io.eio_in #= dut.io.eio_out.toBigInt }
       dut.clockDomain.waitSampling(10)
       SwdRemoteBitbang.serve(dut.io.swclk, dut.io.swdio_i, dut.io.swdio_o, dut.io.swdio_oe, port)
     }
