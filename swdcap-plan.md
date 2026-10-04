@@ -18,7 +18,7 @@ are not modified; only the reset of the SWCLK domain differs between FPGA and si
 ```
 PC — stock OpenOCD (`dap apreg`) + Python CLI over Tcl RPC
   │
-CMSIS-DAP probe (SWD master: Pi Debug Probe, MCU-Link, any DAPLink)
+CMSIS-DAP probe (SWD master: Pi Debug Probe, MCU-Link, RP2040 Pmod, any DAPLink)
   │  SWCLK + SWDIO + GND (+ VTREF from target 3V3)
   │
 SWD transport ................. SpinalHDL dev components, unchanged
@@ -181,6 +181,14 @@ full check, including the GDB lane, through one on 2026-10-03 (MCU-Link). An ear
 module or its leads passed no signal at all, so re-run the reference check after inserting one.
 On the Arty the SWDIO pull-up is the FPGA's internal one (XDC), so the TPH2 needs no resistor
 there. nRESET is not used in v0.1 on any board.
+
+**RP2040 Pmod as the probe.** A ControlPaths RP2040 Pmod running a patched `debugprobe` plugs
+straight into JB and replaces the MCU-Link, the breakout, the leads and the TPH2. It drives SWCLK
+on Pmod pin 3 and SWDIO on pin 7, the same pins as the harness, so the bitstream does not change.
+It has no VTREF pin. Verified 2026-10-04 on the Arty A7-35T with the normal build: `p1_check`,
+`p1_stress 2000` and `p2_check` pass at 1 and 4 MHz. Firmware (branch `rp2040-pmod` of
+<https://github.com/disdi/debugprobe>), pin map and flashing:
+[docs/rp2040-pmod-probe.md](docs/rp2040-pmod-probe.md). Not tried on the Tiny Tapeout demo board.
 
 **Tiny Tapeout (v0.1 silicon target).** Same core, target 1x2 SKY130 tiles. ELA, Wishbone and
 UART generated out; `addressWidth = 10`, `swdAsyncReset = true`. Probe at 1 MHz to start. The mux
@@ -495,6 +503,8 @@ swdcap/
     swdcap/openocd.py             Tcl RPC client (port 6666)
   docs/regmap.md                  the frozen v0.1 contract: AP registers, DMI map, ID and EIO windows
   docs/integration.md             how a design instantiates, pads, constrains and clocks SwdcapTop
+  docs/rp2040-pmod-probe.md       RP2040 Pmod as the CMSIS-DAP probe, plugged straight into JB;
+                                  the firmware is disdi/debugprobe, branch rp2040-pmod
 ```
 
 Ground and VTREF are wiring, not constraints: GND on JB11, a second GND from the breakout to JB5,

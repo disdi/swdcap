@@ -35,6 +35,7 @@ Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then
 - [Plan](swdcap-plan.md)
 - [Integration guide](docs/integration.md)
 - [Register map](docs/regmap.md) (frozen for v0.1)
+- [RP2040 Pmod as the probe](docs/rp2040-pmod-probe.md) (plugs straight into the Arty, no harness)
 
 ## Scope
 
