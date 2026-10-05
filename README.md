@@ -9,7 +9,7 @@ analyzer, a Wishbone bridge and a UART are planned for later releases.
 The FPGA (or chip) is the SWD **target**. Any CMSIS-DAP probe is the master, driven by stock OpenOCD.
 
 ```
-OpenOCD (dap apreg) + swdcap CLI
+OpenOCD (dap apreg) + the procedures in openocd/swdcap.cfg
   -> CMSIS-DAP probe
   -> SW-DP + DMI gateway AP   (SpinalHDL spinal.lib.com.swd + SwdDmiGateway, unchanged)
   -> DMI bus -> ID · EIO      (v0.1)
@@ -18,24 +18,39 @@ OpenOCD (dap apreg) + swdcap CLI
 
 ## Status
 
-P0 (the register contract), P1 (gateway + ID window) and P2 (EIO) are done: in simulation, and on
-a Digilent Arty A7 with an MCU-Link at 1 and 4 MHz. The v0.1 instruments are complete on FPGA.
-The Tiny Tapeout wrapper is next.
+v0.1 is complete on FPGA and submitted for silicon.
 
-Build and test: `git submodule update --init`, then `sbt test` (needs a JDK, sbt and Verilator).
+- **Simulation and FPGA.** P0 (the register contract), P1 (gateway + ID window) and P2 (EIO) pass
+  in simulation and on a Digilent Arty A7 at 1 and 4 MHz, with an MCU-Link and with an RP2040
+  Pmod as the probe.
+- **Silicon.** The same core, generated with a 10-bit DMI address and an asynchronous reset of
+  the SWCLK domain, fits 1x2 SKY130 tiles and passes a gate-level test of the SWD protocol. The
+  Tiny Tapeout project is a separate repository, <https://github.com/disdi/ttsky-swdcap>,
+  submitted to shuttle `ttsky26d` on 2026-10-05.
+- **Not written yet.** The `swdcap` command-line tool. Until then the host side is OpenOCD with
+  the procedures in `openocd/swdcap.cfg`: `swdcap_probe`, `swdcap_rd` / `swdcap_wr`,
+  `swdcap_eio_read` / `swdcap_eio_write`.
+
+## Build and test
+
+`git submodule update --init`, then `sbt test` (needs a JDK, sbt and Verilator).
 `sim/run_openocd.sh` runs a real OpenOCD against the simulation; set `OPENOCD` to the binary.
 
 Arty A7: `boards/arty/swdcap_arty.py --build --load` (needs LiteX, litex-boards and Vivado), then
 the OpenOCD command in the [plan](swdcap-plan.md), section P1b. For EIO, add
 `-f openocd/p2_check.tcl` and run `p2_check`, or use `swdcap_eio_read` / `swdcap_eio_write`.
 
-Order of work: simulation, then a Digilent Arty A7 with a Pmod SWD harness, then a Tiny Tapeout
-(SKY130) wrapper once EIO works on both.
+Netlists: `gen/SwdcapTop.v` is the FPGA build (`sbt "runMain swdcap.SwdcapTopVerilog"`) and
+`gen/silicon/SwdcapTop.v` the Tiny Tapeout one (`sbt "runMain swdcap.SwdcapTopSiliconVerilog"`).
+A design instantiates either without SpinalHDL.
+
+## Documents
 
 - [Plan](swdcap-plan.md)
 - [Integration guide](docs/integration.md)
 - [Register map](docs/regmap.md) (frozen for v0.1)
 - [RP2040 Pmod as the probe](docs/rp2040-pmod-probe.md) (plugs straight into the Arty, no harness)
+- [Tiny Tapeout project](https://github.com/disdi/ttsky-swdcap) (wrapper, constraints, gate-level test)
 
 ## Scope
 

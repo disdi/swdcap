@@ -684,5 +684,4 @@ Status on 2026-10-05: all met except the `swdcap` command-line tool (P6b).
   - ELA, bus peek and UART are not in this bitstream.
   - Not RSDP, and not a CPU debugger unless P7.
 
-  *Met in substance. The README's status paragraph still says the Tiny Tapeout wrapper is
-  next, and its diagram names a `swdcap CLI` that does not exist yet.*
+  *Met. The README also says that the `swdcap` command-line tool is not written yet.*
