@@ -99,7 +99,9 @@ because the two-wire interface has no reset pin.
   only resets the PHY state machine. It does not clear the DP's `apBusy`, sticky flags or
   `SELECT`, the gateway's `dmiPending`, or the CDC toggles. So the SWCLK domain gets an
   asynchronous reset from the chip reset (`rst_n`). SWCLK is stopped at power-up, so releasing
-  that reset is safe.
+  that reset is safe. The Tiny Tapeout wrapper passes `rst_n` through a two-flop synchroniser
+  first: the reset still asserts at once, and its release is aligned to `clk`, so the debug
+  clock domain leaves reset on one edge.
 - This needs no upstream change: `SwdDmiGateway` takes the SWD clock domain as a parameter, and
   `SwdPhyDp` runs in whichever clock domain its parent places it in. `DebugTransportModuleSwd` itself hard-wires the BOOT
   domain, which is why `SwdcapTop` assembles the pieces instead of instantiating it.
@@ -391,7 +393,8 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
   netlist (`SwdcapConfig.tinyTapeout`) was hardened with the Tiny Tapeout local flow
   (LibreLane 3.0.3, `sky130A`, the `ttsky26d` template) behind a throwaway `tt_um_*` wrapper with
   the pin map above. Result and commands: **Area check result** below.
-- **Trims, if a later change needs the space.** None are needed now. `addressWidth = 10` is
+- **Trims, if a later change needs the space.** None are needed now, but the margin is small:
+  see the hardening notes under **Tiny Tapeout repository and gate-level result**. `addressWidth = 10` is
   already the wrapper default and there is no EIO output-enable register. In this order: fewer
   hold buffers (they are about a quarter of the placed cell area), a narrower `scratchWidth`,
   then narrower EIO widths.
@@ -467,7 +470,7 @@ The first `--harden` downloads the PDK and the LibreLane Docker image.
 | File | |
 |---|---|
 | `src/SwdcapTop.v` | copy of `gen/silicon/SwdcapTop.v` from this repository |
-| `src/tt_um_disdi_swdcap.v` | wrapper: SWCLK `uio[2]`, SWDIO `uio[4]`, EIO in `ui_in`, EIO out `uo_out`, `reset = !rst_n` |
+| `src/tt_um_disdi_swdcap.v` | wrapper: SWCLK `uio[2]`, SWDIO `uio[4]`, EIO in `ui_in`, EIO out `uo_out`, two-flop reset synchroniser on `rst_n` |
 | `src/project.sdc`, `src/config.json` | the two clocks, and the two lines that pass the SDC to LibreLane |
 | `test/test.py` | cocotb SWD host model and five tests |
 | `info.yaml`, `docs/info.md` | 1x2 tiles, pinout, registers, bring-up steps |
@@ -487,15 +490,31 @@ The test, each case after a reset pulse and a line reset:
 | RTL, Icarus Verilog | 5 of 5 pass |
 | Gate level: the hardened netlist with the SKY130 functional cell models | 5 of 5 pass |
 | GitHub Actions on the first push | `test`, `docs`, `gds`, `precheck` and `gl_test` pass |
-| Hardening in that repository | 67.8 % utilisation; DRC, LVS and antenna clean; setup and hold met |
+| Hardening in that repository, first version | 67.8 % utilisation; DRC, LVS and antenna clean; setup and hold met; 10 max-slew and 1 max-capacitance violations in the slow corner |
+| Hardening in that repository, with the reset synchroniser and the settings below | 69.0 % utilisation, 515 flip-flops, 430 hold buffers; DRC, LVS and antenna clean; setup and hold met (worst hold slack 0.05 ns); no max-slew or max-capacitance violations; test 5 of 5 on the RTL and on the netlist |
 
 In the gate-level run every flip-flop starts undefined, so a flop that `rst_n` does not reach
 would show up as an undefined value on SWDIO or `uo_out` and fail the test. The run uses unit
 delays, not back-annotated timing, so it checks function and reset, not speed.
 
-Still open from this phase: the 10 max-slew and 1 max-capacitance violations in the slow corner
-(the precheck accepts them), the external pull-up rehearsal with a
-probe that has no pull-up of its own, and the shuttle.
+Hardening notes (2026-10-05). Two settings in `src/config.json` differ from the template, and
+both came out of failed runs:
+
+- **`PL_RESIZER_HOLD_SLACK_MARGIN` is 0.05, not 0.1.** With the reset synchroniser added and
+  the margin left at 0.1, detailed placement fails: the hold buffers no longer fit in 1x2
+  tiles. At 0.05 there are 430 hold buffers where the first version had 610, and hold is met in
+  every corner on top of 0.25 ns of clock uncertainty.
+- **`DESIGN_REPAIR_MAX_SLEW_PCT` and `DESIGN_REPAIR_MAX_CAP_PCT` are 40, not 20.** The repair
+  runs in the typical corner before routing, and later steps add load. A margin of 30 and a
+  repair pass after global routing (`RUN_POST_GRT_DESIGN_REPAIR`) each left 11 max-slew
+  violations in the slow corner; 40 left none.
+
+The result depends on these tuned margins. A larger netlist can bring back the placement
+failure or a marginal slew violation, so harden again after every netlist change. The hold
+buffers remain the first place to recover area.
+
+Still open from this phase: a pull on SWCLK at the target (it floats when the probe is idle),
+the external pull-up rehearsal with a probe that has no pull-up of its own, and the shuttle.
 
 ### P3 — ELA, small (after v0.1, generated out)
 
@@ -620,10 +639,12 @@ on adjacent pins.
 | SWDIO→SWCLK crosstalk | Second ground JP2.3→JB5; separated leads; JB3/JB7, never adjacent pins |
 | Gateway CDC at untested clock ratios | P1 exit runs debug clock both below and above SWCLK |
 | TT mux delay (~20 ns round trip) limits SWCLK | Start at 1 MHz on silicon; 20 ns is small against 125 ns at 4 MHz, so measure the ceiling |
-| Core does not fit 1x2 SKY tiles | Checked 2026-10-05: 67.8 % utilisation with 513 flops, ELA / WB / UART generated out. Re-run the area check after any RTL change; trims: fewer hold buffers, narrower `scratchWidth`, then narrower EIO widths |
+| Core does not fit 1x2 SKY tiles | Checked 2026-10-05: 69.0 % utilisation with 515 flops, ELA / WB / UART generated out. It fits only with a 0.05 ns hold margin, so the headroom is small. Re-run the area check after any RTL change; trims: fewer hold buffers, narrower `scratchWidth`, then narrower EIO widths |
 | Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`. Checked on the Arty with the reset button and in the gate-level simulation, where every flop starts undefined (2026-10-05) |
 | SWCLK on a data pin has no clock constraints or tree | Two-clock SDC through `PNR_SDC_FILE` / `SIGNOFF_SDC_FILE`; the flow built the second clock tree in the area check |
 | SWDIO floats on TT (no internal pull-up) | 10 kΩ–100 kΩ from `uio[4]` to 3.3 V, on a TPH2 test point, not in series; rehearsed on the Arty in PT |
+| SWCLK floats when the probe is idle (no pull on the Arty, on the TT pad or on the demo board) | Open. A floating clock pin can clock the DP; a pull resistor on SWCLK at the target is the candidate fix |
+| `rst_n` released at an arbitrary moment relative to `clk` | Two-flop reset synchroniser in the Tiny Tapeout wrapper: asynchronous assert, release aligned to `clk` |
 | The RP2350 on the TT demo board drives `uio[2]` (GPIO27) / `uio[4]` (GPIO29) | Keep `uio_oe_pico` bits 2 and 4 clear while an external probe is attached |
 | Demo-board `clk` stopped or `rst_n` never pulsed | Bring-up order in the pinout section: select, start `clk`, pulse `rst_n`, then probe |
 | TT bidirectional header does not follow the assumed Pmod layout | Checked 2026-10-05 on the v3 demo board (rev 3.3): pin 3 is `uio[2]`, pin 7 is `uio[4]`. Check again if an older board revision is used |
