@@ -192,7 +192,7 @@ It has no VTREF pin. Verified 2026-10-04 on the Arty A7-35T with the normal buil
 <https://github.com/disdi/debugprobe>), pin map and flashing:
 [docs/rp2040-pmod-probe.md](docs/rp2040-pmod-probe.md). Not tried on the Tiny Tapeout demo board.
 
-**Tiny Tapeout (v0.1 silicon target).** Same core, target 1x2 SKY130 tiles. ELA, Wishbone and
+**Tiny Tapeout (v0.1 silicon target; submitted to shuttle `ttsky26d` on 2026-10-05).** Same core, in 1x2 SKY130 tiles. ELA, Wishbone and
 UART generated out; `addressWidth = 10`, `swdAsyncReset = true`. Probe at 1 MHz to start. The mux
 round trip is about 20 ns, which is small against the 125 ns half period at 4 MHz, so the real
 ceiling is to be measured. Select the project before probing: an inactive tile has its `uio`
@@ -420,8 +420,12 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
   <https://github.com/disdi/ttsky-swdcap>, made from `ttsky-verilog-template`. It carries a copy
   of `gen/silicon/SwdcapTop.v`, so its GitHub Actions need no JVM and harden the same file that
   ran on the Arty. The netlist is never edited there: regenerate it here and copy it.
-- **Shuttle.** Pick the shuttle and note its deadline here. The repository uses the template's
-  `ttsky26d` actions.
+- **Shuttle. Submitted 2026-10-05 to `ttsky26d`** (SKY130),
+  <https://app.tinytapeout.com/shuttles/ttsky26d>, as a 1x2 project from
+  <https://github.com/disdi/ttsky-swdcap>. That repository's head was `7a93353` at the time: the
+  wrapper with the reset synchroniser, hardened without slew or capacitance violations, with
+  every GitHub Actions job passing. A later push there changes the chip only if the project is
+  submitted again before the shuttle closes.
 
 #### Area check result (2026-10-05)
 
@@ -514,7 +518,8 @@ failure or a marginal slew violation, so harden again after every netlist change
 buffers remain the first place to recover area.
 
 Still open from this phase: a pull on SWCLK at the target (it floats when the probe is idle),
-the external pull-up rehearsal with a probe that has no pull-up of its own, and the shuttle.
+and the external pull-up rehearsal with a probe that has no pull-up of its own. Both are
+board-level and can be settled before the chips return.
 
 ### P3 — ELA, small (after v0.1, generated out)
 
