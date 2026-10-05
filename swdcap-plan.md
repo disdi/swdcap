@@ -660,16 +660,29 @@ on adjacent pins.
 
 ## Exit for a public v0.1
 
-- Arty bitstream, JB harness documented, `openocd/swdcap.cfg` in tree, generated `SwdcapTop.v`
-  (EIO on, ELA / WB / UART off) plus the LiteX wrapper.
-- `swdcap probe` prints `AP_IDR 0x74726976`, magic `0x43445753`, and FEATURES bit 0 only.
-- EIO toggles an LED and reads the inputs back.
-- An access to `0x0300` sets STICKYERR, and the next access after ABORT works.
-- LibreLane fits the TT wrapper in 1x2 SKY tiles.
-- TT gate-level simulation passes with X-initialised flops (reset, line reset, MAGIC, EIO,
-  STICKYERR recovery).
-- README states:
+Status on 2026-10-05: all met except the `swdcap` command-line tool (P6b).
+
+- [x] Arty bitstream, JB harness documented, `openocd/swdcap.cfg` in tree, generated `SwdcapTop.v`
+  (EIO on, ELA / WB / UART off) plus the LiteX wrapper. *Met in P1b and P2; the wiring is in
+  this plan and in `docs/integration.md`.*
+- [ ] `swdcap probe` prints `AP_IDR 0x74726976`, magic `0x43445753`, and FEATURES bit 0 only.
+  *Open: the Python tool of P6b is not written. The OpenOCD procedure `swdcap_probe` in
+  `openocd/swdcap.cfg` prints these values today, and `p1_check` verifies them in simulation
+  and on the Arty.*
+- [x] EIO toggles an LED and reads the inputs back. *Met in P2: `p2_check` passes on the Arty
+  build that drives the LEDs, the loopback build proves both directions, and EIO_IN read the
+  switch positions. Nobody has recorded watching the LED walk.*
+- [x] An access to `0x0300` sets STICKYERR, and the next access after ABORT works. *Met in
+  simulation, on the Arty (`p1_check`) and on the hardened Tiny Tapeout netlist.*
+- [x] LibreLane fits the TT wrapper in 1x2 SKY tiles. *Met: 69.0 % utilisation, clean DRC, LVS
+  and antenna, no slew or capacitance violations.*
+- [x] TT gate-level simulation passes with X-initialised flops (reset, line reset, MAGIC, EIO,
+  STICKYERR recovery). *Met: 5 of 5, locally and in GitHub Actions.*
+- [x] README states:
   - SWD slave only, CMSIS-DAP master, stock OpenOCD `dap apreg`.
   - The transport is the SpinalHDL SWD DMI gateway: upstream components and AP map unchanged.
   - ELA, bus peek and UART are not in this bitstream.
   - Not RSDP, and not a CPU debugger unless P7.
+
+  *Met in substance. The README's status paragraph still says the Tiny Tapeout wrapper is
+  next, and its diagram names a `swdcap CLI` that does not exist yet.*
