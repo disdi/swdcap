@@ -211,12 +211,23 @@ included, and SWCLK and SWDIO stay on different rows.
 | EIO out | `uo_out[7:0]` | 8 bits |
 | unused | `uio[0]`, `uio[1]`, `uio[3]`, `uio[5]`, `uio[6]`, `uio[7]` | `uio_oe = 0`, `uio_out = 0` |
 
-This assumes the demo board's bidirectional header follows the standard Pmod layout (`uio[0..3]`
-on pins 1–4, `uio[4..7]` on pins 7–10). Confirm it against the demo-board pinout in PT before the
-pin map is frozen.
+**Confirmed 2026-10-05** against the layout of the current demo board ("Tiny Tapeout Demoboard
+v3", rev 3.3, in <https://github.com/TinyTapeout/tt-demo-pcb>). The bidirectional Pmod is J15:
 
-On the TT demo board the RP2040 also connects to `uio`. It must leave `uio[2]` and `uio[4]`
-undriven while an external probe is attached (`uio_oe_pico` bits 2 and 4 clear).
+| J15 pin | Net |
+|---|---|
+| 1, 2, 3, 4 | `uio[0]`, `uio[1]`, `uio[2]`, `uio[3]` |
+| 5, 11 | GND |
+| 6, 12 | 3.3 V |
+| 7, 8, 9, 10 | `uio[4]`, `uio[5]`, `uio[6]`, `uio[7]` |
+
+So SWCLK is on pin 3 and SWDIO on pin 7, as on the Arty JB harness. Neither net has a pull
+resistor on the board. `uio[2]` is also on pin 3 of the 3-pin header J6. Earlier demo-board
+revisions were not checked.
+
+The demo board's controller, an RP2350 on this revision, also connects to `uio`: GPIO27 is
+`uio[2]` and GPIO29 is `uio[4]`. It must leave both undriven while an external probe is attached
+(`uio_oe_pico` bits 2 and 4 clear).
 
 **MCU-Link on the demo board.** CMSIS-DAP firmware. The board is USB-powered, so the probe must not
 power it; if your MCU-Link has a target-power option, leave it off. Both sides are 3.3 V once
@@ -483,7 +494,7 @@ would show up as an undefined value on SWDIO or `uo_out` and fail the test. The 
 delays, not back-annotated timing, so it checks function and reset, not speed.
 
 Still open from this phase: the 10 max-slew and 1 max-capacitance violations in the slow corner
-(the precheck accepts them), the demo-board Pmod pin map, the external pull-up rehearsal with a
+(the precheck accepts them), the external pull-up rehearsal with a
 probe that has no pull-up of its own, and the shuttle.
 
 ### P3 — ELA, small (after v0.1, generated out)
@@ -613,9 +624,9 @@ on adjacent pins.
 | Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`. Checked on the Arty with the reset button and in the gate-level simulation, where every flop starts undefined (2026-10-05) |
 | SWCLK on a data pin has no clock constraints or tree | Two-clock SDC through `PNR_SDC_FILE` / `SIGNOFF_SDC_FILE`; the flow built the second clock tree in the area check |
 | SWDIO floats on TT (no internal pull-up) | 10 kΩ–100 kΩ from `uio[4]` to 3.3 V, on a TPH2 test point, not in series; rehearsed on the Arty in PT |
-| RP2040 on the TT demo board drives `uio[2]` / `uio[4]` | Keep `uio_oe_pico` bits 2 and 4 clear while an external probe is attached |
+| The RP2350 on the TT demo board drives `uio[2]` (GPIO27) / `uio[4]` (GPIO29) | Keep `uio_oe_pico` bits 2 and 4 clear while an external probe is attached |
 | Demo-board `clk` stopped or `rst_n` never pulsed | Bring-up order in the pinout section: select, start `clk`, pulse `rst_n`, then probe |
-| TT bidirectional header does not follow the assumed Pmod layout | Confirm against the demo-board pinout in PT before freezing the pin map |
+| TT bidirectional header does not follow the assumed Pmod layout | Checked 2026-10-05 on the v3 demo board (rev 3.3): pin 3 is `uio[2]`, pin 7 is `uio[4]`. Check again if an older board revision is used |
 | Tools mistake the gateway for a CPU | DM range reads 0 → `dmstatus.version = 0`; documented in the README |
 | `dap info` output misleads users | Documented; `swdcap probe` is the supported identification path |
 | Later bus bridge wedges the DAP | When generated, Wishbone ERR goes in STAT, not STICKYERR |
