@@ -110,3 +110,10 @@ case class SwdcapTop(c: SwdcapConfig) extends Component {
 object SwdcapTopVerilog extends App {
   SpinalConfig(targetDirectory = "gen").generateVerilog(SwdcapTop(SwdcapConfig()))
 }
+
+/** Generates gen/silicon/SwdcapTop.v: the Tiny Tapeout shape (10-bit DMI address, SWCLK domain
+ *  reset asynchronously from the debug reset). Same module name, so a wrapper takes either file.
+ */
+object SwdcapTopSiliconVerilog extends App {
+  SpinalConfig(targetDirectory = "gen/silicon").generateVerilog(SwdcapTop(SwdcapConfig.tinyTapeout))
+}

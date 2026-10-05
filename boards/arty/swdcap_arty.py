@@ -45,10 +45,20 @@ _swd_io = [
     ),
 ]
 
+# The same pads without the FPGA pull-up on SWDIO (--no-swdio-pullup): the pull-up then has to
+# come from the probe or from a resistor, as on a chip whose pads have none.
+_swd_io_no_pullup = [
+    ("swd", 0,
+        Subsignal("swclk", Pins("pmodb:2")),
+        Subsignal("swdio", Pins("pmodb:4")),
+        IOStandard("LVCMOS33"),
+    ),
+]
+
 
 class SwdcapArty(SoCMini):
     def __init__(self, variant="a7-35", sys_clk_freq=100e6, debug_clk_div=1, eio_loopback=False,
-                 netlist=None):
+                 netlist=None, swdio_pullup=True):
         platform = digilent_arty.Platform(variant=variant, toolchain="vivado")
         self.crg = _CRG(platform, sys_clk_freq, with_dram=False)
         SoCMini.__init__(self, platform, sys_clk_freq, ident="swdcap on Arty A7")
@@ -68,7 +78,7 @@ class SwdcapArty(SoCMini):
         self.specials += AsyncResetSynchronizer(self.cd_debug, ResetSignal("sys"))
 
         # SWD pads
-        platform.add_extension(_swd_io)
+        platform.add_extension(_swd_io if swdio_pullup else _swd_io_no_pullup)
         pads = platform.request("swd")
         swdio_i  = Signal()
         swdio_o  = Signal()
@@ -113,16 +123,26 @@ def main():
                         help="divide the 100 MHz system clock for the debug clock (power of two)")
     parser.add_argument("--eio-loopback",  action="store_true", help="connect eio_in to eio_out")
     parser.add_argument("--netlist",       default=None, help="SwdcapTop netlist (default: gen/SwdcapTop.v)")
+    parser.add_argument("--no-swdio-pullup", action="store_true",
+                        help="leave the FPGA pull-up on SWDIO off (the probe or a resistor must pull it up)")
     parser.add_argument("--output-dir",    default=None, help="build directory")
     parser.add_argument("--build",         action="store_true", help="run Vivado")
     parser.add_argument("--load",          action="store_true", help="load the bitstream into the FPGA")
     args = parser.parse_args()
 
     soc = SwdcapArty(variant=args.variant, debug_clk_div=args.debug_clk_div,
-                     eio_loopback=args.eio_loopback, netlist=args.netlist)
+                     eio_loopback=args.eio_loopback, netlist=args.netlist,
+                     swdio_pullup=not args.no_swdio_pullup)
     name = "swdcap_arty" if args.debug_clk_div == 1 else f"swdcap_arty_div{args.debug_clk_div}"
     if args.eio_loopback:
         name += "_loopback"
+    if args.no_swdio_pullup:
+        name += "_nopullup"
+    if args.netlist:
+        # gen/silicon/SwdcapTop.v -> "_silicon", so a variant never overwrites the normal build
+        variant = os.path.basename(os.path.dirname(os.path.abspath(args.netlist)))
+        if variant != "gen":
+            name += "_" + variant
     output_dir = args.output_dir or os.path.join(REPO, "build", name)
     builder = Builder(soc, output_dir=output_dir, compile_software=False, csr_csv=None)
     builder.build(build_name=name, run=args.build)
