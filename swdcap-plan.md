@@ -384,7 +384,8 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
   already the wrapper default and there is no EIO output-enable register. In this order: fewer
   hold buffers (they are about a quarter of the placed cell area), a narrower `scratchWidth`,
   then narrower EIO widths.
-- **Wrapper.** `tt_um_*` top with the pin map above, `info.yaml`, unused `uio` tied off.
+- **Wrapper. Done 2026-10-05**, in the Tiny Tapeout repository (**Repo layout** below):
+  `tt_um_disdi_swdcap` with the pin map above, `info.yaml` for 1x2 tiles, unused `uio` tied off.
 - **Pull-up rehearsal.** On the Arty, turn off the internal SWDIO pull-up in the XDC and fit the
   same 10 kΩ–100 kΩ resistor on the TPH2's SWDIO test point. That is the electrical setup the
   chip will have.
@@ -395,13 +396,18 @@ harness. No Tiny Tapeout work, including the area check, runs before that.
   flow takes a custom SDC through `PNR_SDC_FILE` and `SIGNOFF_SDC_FILE` in `src/config.json`,
   with `CLOCK_PORT` left at `clk`; clock tree synthesis then builds a tree on `uio_in[2]` as
   well (confirmed in the area check). The recipe in the Tiny Tapeout FAQ is for the older
-  OpenLane and is not needed. The final SDC still needs real I/O delays.
-- **Gate-level simulation** with an SWD host model and X-initialised flops: reset, line reset,
-  DPIDR, AP_IDR, MAGIC, scratch, EIO, reserved-window STICKYERR and recovery after ABORT.
-- **Repo layout.** TT submissions follow the TT template (`info.yaml`, `src/`, `test/`, GDS
-  workflow). Decide here between a `tt/` directory in this repo and a separate repo made from
-  the template that vendors `gen/SwdcapTop.v`.
-- **Shuttle.** Pick the shuttle and note its deadline here.
+  OpenLane and is not needed. In the Tiny Tapeout repository SWDIO is timed against SWCLK, and
+  EIO and `rst_n` against `clk`; the delay values are still estimates, not measured board
+  figures.
+- **Gate-level simulation. Done 2026-10-05.** A cocotb test with an SWD host model drives the
+  wire protocol at 1 MHz against a free-running 50 MHz `clk`. It passes on the RTL and on the
+  hardened netlist. Result: **Tiny Tapeout repository and gate-level result** below.
+- **Repo layout. Decided 2026-10-05: a separate repository**,
+  <https://github.com/disdi/ttsky-swdcap>, made from `ttsky-verilog-template`. It carries a copy
+  of `gen/silicon/SwdcapTop.v`, so its GitHub Actions need no JVM and harden the same file that
+  ran on the Arty. The netlist is never edited there: regenerate it here and copy it.
+- **Shuttle.** Pick the shuttle and note its deadline here. The repository uses the template's
+  `ttsky26d` actions.
 
 #### Area check result (2026-10-05)
 
@@ -442,6 +448,43 @@ export PDK=sky130A LIBRELANE_TAG=3.0.3
 ```
 
 The first `--harden` downloads the PDK and the LibreLane Docker image.
+
+#### Tiny Tapeout repository and gate-level result (2026-10-05)
+
+<https://github.com/disdi/ttsky-swdcap>:
+
+| File | |
+|---|---|
+| `src/SwdcapTop.v` | copy of `gen/silicon/SwdcapTop.v` from this repository |
+| `src/tt_um_disdi_swdcap.v` | wrapper: SWCLK `uio[2]`, SWDIO `uio[4]`, EIO in `ui_in`, EIO out `uo_out`, `reset = !rst_n` |
+| `src/project.sdc`, `src/config.json` | the two clocks, and the two lines that pass the SDC to LibreLane |
+| `test/test.py` | cocotb SWD host model and five tests |
+| `info.yaml`, `docs/info.md` | 1x2 tiles, pinout, registers, bring-up steps |
+
+The test, each case after a reset pulse and a line reset:
+
+| Test | Checks |
+|---|---|
+| `test_identify` | DPIDR, AP_IDR, MAGIC, VERSION, FEATURES, EIO_WIDTH, DMI_ADDR 10 bits, `dmstatus` reads 0 |
+| `test_scratch` | SCRATCH resets to 0 and reads back four patterns |
+| `test_eio` | EIO_OUT drives `uo_out`; EIO_IN reads `ui_in`; a write to EIO_IN is ignored without an error |
+| `test_error_and_abort` | read and write of `0x0300` set STICKYERR; ABORT clears it; MAGIC reads again |
+| `test_reset_clears_both_domains` | `rst_n` clears STICKYERR and DMI_ADDR (SWCLK domain) and SCRATCH and EIO_OUT (debug domain) |
+
+| Run | Result |
+|---|---|
+| RTL, Icarus Verilog | 5 of 5 pass |
+| Gate level: the hardened netlist with the SKY130 functional cell models | 5 of 5 pass |
+| GitHub Actions on the first push | `test`, `docs`, `gds`, `precheck` and `gl_test` pass |
+| Hardening in that repository | 67.8 % utilisation; DRC, LVS and antenna clean; setup and hold met |
+
+In the gate-level run every flip-flop starts undefined, so a flop that `rst_n` does not reach
+would show up as an undefined value on SWDIO or `uo_out` and fail the test. The run uses unit
+delays, not back-annotated timing, so it checks function and reset, not speed.
+
+Still open from this phase: the 10 max-slew and 1 max-capacitance violations in the slow corner
+(the precheck accepts them), the demo-board Pmod pin map, the external pull-up rehearsal with a
+probe that has no pull-up of its own, and the shuttle.
 
 ### P3 — ELA, small (after v0.1, generated out)
 
@@ -534,9 +577,8 @@ swdcap/
                                   two SWD pads on JB; --debug-clk-div for a slow debug clock.
                                   Not in a directory called litex/, which would shadow the
                                   LiteX Python package
-  tt/                        PT   Tiny Tapeout: info.yaml, src/tt_um_*_swdcap.v wrapper,
-                                  two-clock SDC, test/ gate-level sim (or a separate repo from
-                                  the TT template; decided in PT)
+  # Tiny Tapeout is a separate repository, https://github.com/disdi/ttsky-swdcap: info.yaml,
+  # src/tt_um_disdi_swdcap.v wrapper, two-clock SDC, cocotb RTL and gate-level test
   constr/arty_jb.xdc              the same pad and clock constraints for a non-LiteX design
                                   (derived from the verified LiteX build; not run by itself)
   openocd/swdcap.cfg              swd newdap, dap create, swdcap_rd / swdcap_wr / swdcap_probe /
@@ -568,7 +610,7 @@ on adjacent pins.
 | Gateway CDC at untested clock ratios | P1 exit runs debug clock both below and above SWCLK |
 | TT mux delay (~20 ns round trip) limits SWCLK | Start at 1 MHz on silicon; 20 ns is small against 125 ns at 4 MHz, so measure the ceiling |
 | Core does not fit 1x2 SKY tiles | Checked 2026-10-05: 67.8 % utilisation with 513 flops, ELA / WB / UART generated out. Re-run the area check after any RTL change; trims: fewer hold buffers, narrower `scratchWidth`, then narrower EIO widths |
-| Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`; gate-level sim with X-initialised flops |
+| Silicon powers up with undefined SWD state | `swdAsyncReset = true`: SWCLK domain reset from `rst_n`. Checked on the Arty with the reset button and in the gate-level simulation, where every flop starts undefined (2026-10-05) |
 | SWCLK on a data pin has no clock constraints or tree | Two-clock SDC through `PNR_SDC_FILE` / `SIGNOFF_SDC_FILE`; the flow built the second clock tree in the area check |
 | SWDIO floats on TT (no internal pull-up) | 10 kΩ–100 kΩ from `uio[4]` to 3.3 V, on a TPH2 test point, not in series; rehearsed on the Arty in PT |
 | RP2040 on the TT demo board drives `uio[2]` / `uio[4]` | Keep `uio_oe_pico` bits 2 and 4 clear while an external probe is attached |
